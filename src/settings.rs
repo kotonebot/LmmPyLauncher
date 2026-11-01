@@ -99,6 +99,8 @@ fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String>
     w.set_body(SharedString::from(s.region_body));
     w.set_label_cn(SharedString::from(s.region_cn));
     w.set_label_intl(SharedString::from(s.region_intl));
+    w.set_note_cn(SharedString::from(s.region_cn_note));
+    w.set_note_intl(SharedString::from(s.region_intl_note));
     {
         let tx = tx.clone();
         let weak = w.as_weak();

@@ -47,6 +47,9 @@ pub struct Strings {
     pub region_body: &'static str,
     pub region_cn: &'static str,
     pub region_intl: &'static str,
+    /// 各选项的说明行（command link note）
+    pub region_cn_note: &'static str,
+    pub region_intl_note: &'static str,
 
     // ---- 主流程 ----
     pub initializing: &'static str,
@@ -253,6 +256,8 @@ const ZH: Strings = Strings {
     region_body: "这将决定软件下载源（PyPI 镜像等），之后可在启动器旁的 launcher.conf.json 中修改。",
     region_cn: "中国大陆",
     region_intl: "其他地区",
+    region_cn_note: "使用国内 PyPI 镜像（清华、阿里、腾讯），下载更快",
+    region_intl_note: "使用 PyPI 官方源（pypi.org）直连下载",
 
     initializing: "初始化...",
     python_not_found: "未找到 Python 解释器，准备部署...",
@@ -388,6 +393,8 @@ const EN: Strings = Strings {
     region_body: "This decides the download sources (PyPI mirrors etc.). You can change it later in launcher.conf.json next to the launcher.",
     region_cn: "Mainland China",
     region_intl: "Other regions",
+    region_cn_note: "Use Chinese PyPI mirrors (TUNA, Aliyun, Tencent) for faster downloads",
+    region_intl_note: "Connect directly to the official PyPI (pypi.org)",
 
     initializing: "Initializing...",
     python_not_found: "No Python interpreter found. Preparing deployment...",

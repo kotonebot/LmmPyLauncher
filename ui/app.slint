@@ -170,37 +170,49 @@ export component MainWindow inherits Window {
 // 命令链接（Task Dialog command link）：整行可点击，悬停高亮，绿色箭头 + 标签
 component CommandLink inherits Rectangle {
     in property <string> label;
+    in property <string> note; // 选项说明（Task Dialog command link 的 note 行）
     in property <bool> framed; // 默认项带边框
     callback clicked();
 
     border-radius: 4px;
     border-width: root.framed ? 1px : 0px;
-    border-color: Palette.alternate-background;
+    border-color: touch.has-hover ? #0067C0 : Palette.alternate-background;
     background: touch.has-hover ? Palette.alternate-background : transparent;
-    min-height: 40px;
+    min-height: 56px;
 
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
     }
     HorizontalLayout {
-        padding-left: 14px;
-        padding-right: 14px;
-        spacing: 12px;
-        alignment: center;
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 14px;
 
+        // 箭头随悬停变蓝，与文字区分层级
         Text {
             text: "\u{E72A}";
             font-family: "Segoe MDL2 Assets";
-            font-size: 14px;
-            color: #107C10;
+            font-size: 16px;
+            color: touch.has-hover ? #0067C0 : #107C10;
             vertical-alignment: center;
         }
-        Text {
-            text: root.label;
-            font-size: 14px;
-            color: Palette.foreground;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+
+            Text {
+                text: root.label;
+                font-size: 15px;
+                font-weight: 600;
+                color: Palette.foreground;
+            }
+            Text {
+                text: root.note;
+                font-size: 11px;
+                color: Palette.foreground;
+                opacity: 0.6;
+            }
         }
     }
 }
@@ -222,6 +234,8 @@ export component RegionWindow inherits Window {
     in property <string> body;
     in property <string> label-cn;
     in property <string> label-intl;
+    in property <string> note-cn;
+    in property <string> note-intl;
 
     callback choose-cn();
     callback choose-intl();
@@ -249,12 +263,14 @@ export component RegionWindow inherits Window {
 
         CommandLink {
             label: root.label-cn;
+            note: root.note-cn;
             framed: true;
             clicked => { root.choose-cn(); }
         }
         Rectangle { height: 4px; }
         CommandLink {
             label: root.label-intl;
+            note: root.note-intl;
             clicked => { root.choose-intl(); }
         }
     }
