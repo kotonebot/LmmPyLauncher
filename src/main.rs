@@ -795,7 +795,13 @@ fn place_offscreen(window: &MainWindow) {
 /// 取主窗口的 Win32 HWND：枚举本进程的可见顶层窗口（不能用按标题的
 /// FindWindowW——多实例并存时会拿到别的实例的窗口）
 #[cfg(windows)]
-fn hwnd_of() -> Option<*mut core::ffi::c_void> {
+pub(crate) fn hwnd_of() -> Option<*mut core::ffi::c_void> {
+    hwnd_of_excluding(None)
+}
+
+/// 同 [`hwnd_of`]，但可排除一个已知窗口（如主窗口，用于定位新弹出的对话框）
+#[cfg(windows)]
+pub(crate) fn hwnd_of_excluding(exclude: Option<*mut core::ffi::c_void>) -> Option<*mut core::ffi::c_void> {
     #[link(name = "user32")]
     extern "system" {
         fn EnumWindows(callback: extern "system" fn(*mut core::ffi::c_void, isize) -> i32, lparam: isize) -> i32;
@@ -803,12 +809,21 @@ fn hwnd_of() -> Option<*mut core::ffi::c_void> {
         fn IsWindowVisible(hwnd: *mut core::ffi::c_void) -> i32;
         fn GetCurrentProcessId() -> u32;
     }
+    struct Ctx {
+        exclude: Option<*mut core::ffi::c_void>,
+        found: Option<*mut core::ffi::c_void>,
+    }
     extern "system" fn enum_proc(hwnd: *mut core::ffi::c_void, lparam: isize) -> i32 {
+        let ctx = unsafe { &mut *(lparam as *mut Ctx) };
         unsafe {
             let mut pid = 0u32;
             GetWindowThreadProcessId(hwnd, &mut pid);
-            if pid == GetCurrentProcessId() && IsWindowVisible(hwnd) != 0 && !is_excluded_window(hwnd) {
-                *(lparam as *mut Option<*mut core::ffi::c_void>) = Some(hwnd);
+            if pid == GetCurrentProcessId()
+                && IsWindowVisible(hwnd) != 0
+                && Some(hwnd) != ctx.exclude
+                && !is_excluded_window(hwnd)
+            {
+                ctx.found = Some(hwnd);
                 return 0; // 找到即停
             }
         }
@@ -831,9 +846,9 @@ fn hwnd_of() -> Option<*mut core::ffi::c_void> {
         let class = class.trim_end_matches('\0');
         class == "Winit Thread Event Target" || class == "#32770"
     }
-    let mut found: Option<*mut core::ffi::c_void> = None;
-    unsafe { EnumWindows(enum_proc, &mut found as *mut _ as isize); }
-    found
+    let mut ctx = Ctx { exclude, found: None };
+    unsafe { EnumWindows(enum_proc, &mut ctx as *mut _ as isize); }
+    ctx.found
 }
 
 /// 最小化窗口（Slint 1.18 没有暴露 minimize API，走 Win32）

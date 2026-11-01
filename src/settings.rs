@@ -90,6 +90,8 @@ fn ask_user() -> Region {
 fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String> {
     use slint::SharedString;
     let s = crate::i18n::strings();
+    // 主窗口先于本对话框存在，记录为模态属主
+    let owner = crate::hwnd_of();
     let w = RegionWindow::new().map_err(|e| e.to_string())?;
     w.set_window_title(SharedString::from(s.region_title));
     w.set_question(SharedString::from(s.region_question));
@@ -98,8 +100,12 @@ fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String>
     {
         let tx = tx.clone();
         let weak = w.as_weak();
+        let owner = owner;
         w.on_choose_cn(move || {
             let _ = tx.send(Region::Cn);
+            if let Some(o) = owner {
+                crate::win32::release_modal_dialog(o);
+            }
             if let Some(w) = weak.upgrade() {
                 let _ = w.hide();
             }
@@ -107,14 +113,48 @@ fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String>
     }
     {
         let weak = w.as_weak();
+        let owner = owner;
         w.on_choose_intl(move || {
             let _ = tx.send(Region::Intl);
+            if let Some(o) = owner {
+                crate::win32::release_modal_dialog(o);
+            }
             if let Some(w) = weak.upgrade() {
                 let _ = w.hide();
             }
         });
     }
-    w.show().map_err(|e| e.to_string())
+    // 点原生标题栏 X 关闭也要释放属主，否则主窗口将永远不可聚焦
+    // （on_close_requested 在 slint::Window 上，不是组件生成的回调）
+    if let Some(owner) = owner {
+        w.window().on_close_requested(move || {
+            crate::win32::release_modal_dialog(owner);
+            slint::CloseRequestResponse::HideWindow
+        });
+    }
+
+    w.show().map_err(|e| e.to_string())?;
+
+    // Slint/winit 没有模态窗口 API，走 Win32 原生机制（系统对话框同款）：
+    // owned window + EnableWindow 禁用属主 + 居中到属主。Slint 窗口惰性创建，
+    // 用 Timer 轮询等 HWND 出现（对齐 main.rs 的做法）
+    if let Some(owner) = owner {
+        let timer = std::rc::Rc::new(slint::Timer::default());
+        let timer2 = timer.clone();
+        timer.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(1),
+            move || {
+                if let Some(dialog) = crate::hwnd_of_excluding(Some(owner)) {
+                    timer2.stop();
+                    crate::win32::setup_modal_dialog(dialog, owner);
+                }
+            },
+        );
+        // Timer 被 drop 会停止，泄漏一份活到对话框关闭
+        std::mem::forget(timer);
+    }
+    Ok(())
 }
 
 #[cfg(not(windows))]

@@ -47,6 +47,7 @@ struct MARGINS {
 
 const GWLP_WNDPROC: i32 = -4;
 const GWL_STYLE: i32 = -16;
+const GWL_HWNDPARENT: i32 = -8;
 const WM_NCCALCSIZE: u32 = 0x0083;
 const WM_NCHITTEST: u32 = 0x0084;
 const WM_CLOSE: u32 = 0x0010;
@@ -297,5 +298,47 @@ unsafe fn pass_through(hwnd: *mut core::ffi::c_void, lp: isize) -> isize {
         CallWindowProcW(orig, hwnd, WM_NCHITTEST, 0, lp)
     } else {
         DefWindowProcW(hwnd, WM_NCHITTEST, 0, lp)
+    }
+}
+
+/// 原生模态对话框化（Win32 标准机制，系统对话框同款）：
+/// 1. 把 dialog 设为 owner 的 owned window——始终保持在 owner 之上、随 owner 最小化
+/// 2. EnableWindow(owner, FALSE)——owner 关闭前无法被聚焦/点击
+/// 3. 把 dialog 居中到 owner 上方并抢焦点
+/// 在 dialog 显示后（HWND 已创建）调用一次。成对调用 [`release_modal_dialog`]。
+pub fn setup_modal_dialog(dialog: *mut core::ffi::c_void, owner: *mut core::ffi::c_void) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn SetWindowLongPtrW(hwnd: *mut core::ffi::c_void, index: i32, value: isize) -> isize;
+        fn EnableWindow(hwnd: *mut core::ffi::c_void, enable: i32) -> i32;
+        fn SetForegroundWindow(hwnd: *mut core::ffi::c_void) -> i32;
+    }
+    unsafe {
+        SetWindowLongPtrW(dialog, GWL_HWNDPARENT, owner as isize);
+        EnableWindow(owner, 0);
+        // 居中到 owner
+        let mut or_ = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        let mut dr = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        GetWindowRect(owner, &mut or_);
+        GetWindowRect(dialog, &mut dr);
+        let dw = dr.right - dr.left;
+        let dh = dr.bottom - dr.top;
+        let x = or_.left + ((or_.right - or_.left) - dw) / 2;
+        let y = or_.top + ((or_.bottom - or_.top) - dh) / 2;
+        SetWindowPos(dialog, std::ptr::null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+        SetForegroundWindow(dialog);
+    }
+}
+
+/// 关闭模态对话框时调用：重新启用属主窗口并交还前台
+pub fn release_modal_dialog(owner: *mut core::ffi::c_void) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnableWindow(hwnd: *mut core::ffi::c_void, enable: i32) -> i32;
+        fn SetForegroundWindow(hwnd: *mut core::ffi::c_void) -> i32;
+    }
+    unsafe {
+        EnableWindow(owner, 1);
+        SetForegroundWindow(owner);
     }
 }
