@@ -43,7 +43,7 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
 | `entry_point` | `python -m` 的模块路径 |
 | `launch_command` | 启动命令模板，占位符 `{python}` / `{entry_point}` / `{extra_args}` |
 | `icon` | exe 图标（.ico，可选） |
-| `logoPath` | splash logo 图片（PNG/JPEG/SVG，可选） |
+| `logoPath` | splash logo 图片（PNG/JPEG/SVG，可选；留空则不展示 logo） |
 
 2. 构建：`cargo build --release`（产物 `target/release/LmmPyLauncher.exe`）
 3. 分发：exe 与主程序包同目录放置，用户双击即用

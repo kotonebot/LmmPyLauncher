@@ -9,5 +9,5 @@
   "entry_point": "my_app.main",
   "launch_command": "{python} -m {entry_point} {extra_args}",
   "icon": "",
-  "logoPath": "logo.png"
+  "logoPath": ""
 }
