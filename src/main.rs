@@ -651,8 +651,13 @@ fn main() {
     let main_window = MainWindow::new().expect(s.window_create_fail);
     let config = app_config::get();
     main_window.set_app_name(SharedString::from(config.app_name.as_str()));
-    // 未配置 logoPath 时是空文件，解析失败 → 空图片（宽度 0），Slint 端不渲染
-    main_window.set_logo(slint::Image::load_from_data(LOGO_DATA, None).unwrap_or_default());
+    // 未配置 logoPath 时是空文件，跳过解码（避免 slint 打印解码错误），
+    // 用空图片（宽度 0），Slint 端不渲染
+    main_window.set_logo(if LOGO_DATA.is_empty() {
+        slint::Image::default()
+    } else {
+        slint::Image::load_from_data(LOGO_DATA, None).unwrap_or_default()
+    });
     main_window.set_status(SharedString::from(s.ready));
     main_window.set_label_details(SharedString::from(s.details));
     main_window.set_label_collapse_details(SharedString::from(s.collapse_details));
