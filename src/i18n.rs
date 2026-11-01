@@ -226,6 +226,20 @@ pub struct Strings {
     pub launcher_version: &'static str,
     /// `{}` = 版本
     pub python_exists: &'static str,
+
+    // ---- 启动期致命错误（panic / 参数解析） ----
+    /// `{}` = 错误
+    pub config_parse_fail: &'static str,
+    /// `{}` = 字段名
+    pub config_missing_field: &'static str,
+    pub region_not_init: &'static str,
+    /// `{}` = 参数
+    pub unsupported_file_type: &'static str,
+    /// `{}` = 命令
+    pub running_cmd: &'static str,
+    pub window_create_fail: &'static str,
+    pub window_show_fail: &'static str,
+    pub event_loop_fail: &'static str,
 }
 
 const ZH: Strings = Strings {
@@ -352,6 +366,15 @@ const ZH: Strings = Strings {
     launcher_started: "启动器已启动。",
     launcher_version: "启动器版本: {}",
     python_exists: "Python {} 已存在: {}",
+
+    config_parse_fail: "launcher.json 编译期配置解析失败: {}",
+    config_missing_field: "launcher.json 缺少必填配置项: {}",
+    region_not_init: "region 未初始化（应先调用 settings::ensure）",
+    unsupported_file_type: "不支持的文件类型: {}",
+    running_cmd: "运行: {}",
+    window_create_fail: "无法创建主窗口",
+    window_show_fail: "无法显示主窗口",
+    event_loop_fail: "Slint 事件循环错误",
 };
 
 const EN: Strings = Strings {
@@ -478,6 +501,15 @@ const EN: Strings = Strings {
     launcher_started: "Launcher started.",
     launcher_version: "Launcher version: {}",
     python_exists: "Python {} already exists: {}",
+
+    config_parse_fail: "Failed to parse launcher.json: {}",
+    config_missing_field: "launcher.json is missing required field: {}",
+    region_not_init: "region not initialized (call settings::ensure first)",
+    unsupported_file_type: "Unsupported file type: {}",
+    running_cmd: "Running: {}",
+    window_create_fail: "Failed to create the main window",
+    window_show_fail: "Failed to show the main window",
+    event_loop_fail: "Slint event loop error",
 };
 
 pub fn strings() -> &'static Strings {

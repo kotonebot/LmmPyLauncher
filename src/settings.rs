@@ -28,7 +28,7 @@ static REGION: OnceLock<Region> = OnceLock::new();
 
 /// 已确认的地区。必须先在主流程开头调用 [`ensure`]。
 pub fn get() -> Region {
-    *REGION.get().expect("region 未初始化（应先调用 settings::ensure）")
+    *REGION.get().expect(&*crate::i18n::fill(crate::i18n::strings().region_not_init, &[]))
 }
 
 /// 加载地区配置；没有有效配置时弹窗询问用户并持久化。

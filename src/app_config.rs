@@ -17,6 +17,8 @@
 use serde_json::Value;
 use std::sync::OnceLock;
 
+use crate::i18n::{fill, strings};
+
 const CONFIG_JSON: &str = include_str!("../launcher.json");
 
 #[derive(Debug)]
@@ -35,7 +37,7 @@ static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 pub fn get() -> &'static AppConfig {
     CONFIG.get_or_init(|| {
         let v: Value = serde_json::from_str(CONFIG_JSON)
-            .unwrap_or_else(|e| panic!("launcher.json 编译期配置解析失败: {e}"));
+            .unwrap_or_else(|e| panic!("{}", fill(strings().config_parse_fail, &[&e.to_string()])));
         AppConfig {
             app_name: v["app_name"].as_str().unwrap_or("App").to_string(),
             python_version: v["python_version"].as_str().unwrap_or("3.10.11").to_string(),
@@ -59,7 +61,7 @@ fn string_array(v: &Value, key: &str) -> Vec<String> {
         })
         .unwrap_or_default();
     if arr.is_empty() {
-        panic!("launcher.json 缺少非空配置项: {key}");
+        panic!("{}", fill(strings().config_missing_field, &[key]));
     }
     arr
 }
@@ -68,7 +70,7 @@ fn string_array(v: &Value, key: &str) -> Vec<String> {
 fn required(v: &Value, key: &str) -> String {
     let s = v[key].as_str().unwrap_or("");
     if s.is_empty() {
-        panic!("launcher.json 缺少必填配置项: {key}");
+        panic!("{}", fill(strings().config_missing_field, &[key]));
     }
     s.to_string()
 }

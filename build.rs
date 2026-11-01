@@ -1,4 +1,11 @@
 fn main() {
+    // launcher.json 是集成方私有配置（不进 git）；仓库初次 clone 时从示例生成，
+    // 让项目开箱即可编译（占位配置，集成方必须替换成自己的值）
+    if !std::path::Path::new("launcher.json").exists() {
+        std::fs::copy("launcher.example.json", "launcher.json")
+            .expect("launcher.json 缺失，且无法从 launcher.example.json 生成");
+    }
+
     slint_build::compile("ui/app.slint").unwrap();
 
     // 编译期配置（launcher.json）：splash logo（可选 logoPath）。

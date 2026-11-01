@@ -16,7 +16,8 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
 
 ## 使用（集成方）
 
-1. 修改 `launcher.json`（编译期配置，嵌入二进制）：
+1. 复制 `launcher.example.json` 为 `launcher.json`（编译期配置，嵌入二进制；
+   `launcher.json` 不进 git，缺失时构建脚本会自动从示例生成一份占位配置）：
 
 ```json
 {

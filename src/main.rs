@@ -90,6 +90,7 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args, String> {
+    let s = i18n::strings();
     let mut args = Args {
         install_version: None,
         install_from_zip: None,
@@ -133,7 +134,7 @@ fn parse_args() -> Result<Args, String> {
                     args.install_from_package = Some(std::path::PathBuf::from(a));
                 }
             } else {
-                return Err(format!("不支持的文件类型: {a}"));
+                return Err(i18n::fill(s.unsupported_file_type, &[a]));
             }
         }
         i += 1;
@@ -309,7 +310,7 @@ fn run_app(ui: &Ui, extra_args: &[String]) -> Result<(), String> {
             other => parts.push(other.replace("{entry_point}", &config.entry_point)),
         }
     }
-    ui.log(&format!("运行: {}", parts.join(" ")));
+    ui.log(&i18n::fill(s.running_cmd, &[&parts.join(" ")]));
 
     let (program, cmd_args) = parts
         .split_first()
@@ -647,7 +648,7 @@ fn main() {
         args.skip_update = true;
     }
 
-    let main_window = MainWindow::new().expect("无法创建主窗口");
+    let main_window = MainWindow::new().expect(s.window_create_fail);
     let config = app_config::get();
     main_window.set_app_name(SharedString::from(config.app_name.as_str()));
     // 未配置 logoPath 时是空文件，解析失败 → 空图片（宽度 0），Slint 端不渲染
@@ -709,7 +710,7 @@ fn main() {
     #[cfg(windows)]
     place_offscreen(&main_window);
 
-    main_window.show().expect("无法显示主窗口");
+    main_window.show().expect(s.window_show_fail);
     #[cfg(not(windows))]
     center_on_screen(&main_window);
 
@@ -754,7 +755,7 @@ fn main() {
 }
 
 fn run_main_window(window: MainWindow) {
-    window.run().expect("Slint 事件循环错误");
+    window.run().expect(i18n::strings().event_loop_fail);
 }
 
 /// 将窗口放到主屏幕正中央（Slint 没有内置居中，用 Win32 API 计算）

@@ -1,3 +1,6 @@
 /target
 /logs
 build_last.txt
+
+# 编译期配置（集成方私有，见 launcher.example.json）
+launcher.json

@@ -1,0 +1,13 @@
+{
+  "app_name": "My App",
+  "python_version": "3.11.9",
+  "python_dist_dir": "",
+  "install_packages": [
+    "my-app"
+  ],
+  "uninstall_packages": [],
+  "entry_point": "my_app.main",
+  "launch_command": "{python} -m {entry_point} {extra_args}",
+  "icon": "",
+  "logoPath": "logo.png"
+}
