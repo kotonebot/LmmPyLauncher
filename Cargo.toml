@@ -1,6 +1,6 @@
 [package]
 name = "LmmPyLauncher"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "LmmPyLauncher — 通用 Python 桌面应用启动器（Slint GUI）"
 
@@ -14,7 +14,9 @@ slint = { version = "1", default-features = false, features = [
     "std",
     "compat-1-0",
     "backend-winit",
-    "renderer-femtovg",
+    # skia 渲染器：femtovg 对 CJK 粗体/亚像素定位的字形渲染有缺陷（重影、糊），
+    # skia 文本渲染质量显著更好，代价是二进制增大约 3-4MB
+    "renderer-skia",
 ] }
 ureq = "2"
 serde_json = "1"

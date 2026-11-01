@@ -59,7 +59,8 @@ fn prompt_user(app_name: &str, dir: &Path) -> bool {
     const IDOK: i32 = 1;
     let s = strings();
     let text = fill(s.deploy_prompt, &[app_name, &dir.display().to_string()]);
-    win32::message_box(&text, s.deploy_prompt_title, MB_OKCANCEL | MB_ICONQUESTION) == IDOK
+    // 挂主窗口为属主：此时主窗口是前台，无属主的消息框会被它完全遮挡
+    win32::message_box_owned(crate::hwnd_of(), &text, s.deploy_prompt_title, MB_OKCANCEL | MB_ICONQUESTION) == IDOK
 }
 
 /// 确保有可用的 Python：弹窗确认后自动部署 embed 版，返回解释器路径

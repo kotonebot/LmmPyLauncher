@@ -87,13 +87,26 @@ static ORIG_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 
 /// 原生消息框（可在任意线程调用）。返回按钮 ID（如 IDOK=1、IDCANCEL=2）。
 pub fn message_box(text: &str, title: &str, style: u32) -> i32 {
+    message_box_owned(None, text, title, style)
+}
+
+/// 带属主的消息框：owner 为 Some 时弹窗始终保持在属主之上并居中到属主。
+/// 主窗口是前台时必须传入 owner，否则无属主弹窗抢不到前台，会被主窗口完全遮挡。
+pub fn message_box_owned(
+    owner: Option<*mut core::ffi::c_void>,
+    text: &str,
+    title: &str,
+    style: u32,
+) -> i32 {
     #[link(name = "user32")]
     extern "system" {
         fn MessageBoxW(hwnd: *mut core::ffi::c_void, text: *const u16, title: *const u16, style: u32) -> i32;
     }
     let text: Vec<u16> = text.encode_utf16().chain([0]).collect();
     let title: Vec<u16> = title.encode_utf16().chain([0]).collect();
-    unsafe { MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), style) }
+    unsafe {
+        MessageBoxW(owner.unwrap_or(std::ptr::null_mut()), text.as_ptr(), title.as_ptr(), style)
+    }
 }
 
 /// 无边框化 + DWM 接入。在窗口显示后、UI 线程调用。
