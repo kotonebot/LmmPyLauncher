@@ -93,8 +93,10 @@ fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String>
     // 主窗口先于本对话框存在，记录为模态属主
     let owner = crate::hwnd_of();
     let w = RegionWindow::new().map_err(|e| e.to_string())?;
-    w.set_window_title(SharedString::from(s.region_title));
-    w.set_question(SharedString::from(s.region_question));
+    // Task Dialog 惯例：原生标题栏标题 = 应用名，主指令才是提问文案
+    w.set_window_title(SharedString::from(crate::app_config::get().app_name.as_str()));
+    w.set_instruction(SharedString::from(s.region_instruction));
+    w.set_body(SharedString::from(s.region_body));
     w.set_label_cn(SharedString::from(s.region_cn));
     w.set_label_intl(SharedString::from(s.region_intl));
     {
@@ -124,14 +126,9 @@ fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String>
             }
         });
     }
-    // 点原生标题栏 X 关闭也要释放属主，否则主窗口将永远不可聚焦
-    // （on_close_requested 在 slint::Window 上，不是组件生成的回调）
-    if let Some(owner) = owner {
-        w.window().on_close_requested(move || {
-            crate::win32::release_modal_dialog(owner);
-            slint::CloseRequestResponse::HideWindow
-        });
-    }
+    // 模态选择框不允许关闭（没有有效选择就没有持久化配置）：
+    // 点原生标题栏 X 一律忽略
+    w.window().on_close_requested(|| slint::CloseRequestResponse::KeepWindowShown);
 
     w.show().map_err(|e| e.to_string())?;
 
@@ -148,6 +145,7 @@ fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String>
                 if let Some(dialog) = crate::hwnd_of_excluding(Some(owner)) {
                     timer2.stop();
                     crate::win32::setup_modal_dialog(dialog, owner);
+                    crate::win32::disable_close_button(dialog);
                 }
             },
         );

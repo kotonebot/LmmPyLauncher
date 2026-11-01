@@ -330,6 +330,25 @@ pub fn setup_modal_dialog(dialog: *mut core::ffi::c_void, owner: *mut core::ffi:
     }
 }
 
+/// 置灰窗口标题栏的关闭按钮（X）：从系统菜单移除 SC_CLOSE。
+/// 用于不允许关闭的模态对话框；配合 on_close_requested 的 KeepWindowShown 双保险。
+pub fn disable_close_button(hwnd: *mut core::ffi::c_void) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetSystemMenu(hwnd: *mut core::ffi::c_void, revert: i32) -> *mut core::ffi::c_void;
+        fn EnableMenuItem(menu: *mut core::ffi::c_void, item: u32, flags: u32) -> i32;
+    }
+    const SC_CLOSE: u32 = 0xF060;
+    const MF_BYCOMMAND: u32 = 0x0;
+    const MF_GRAYED: u32 = 0x1;
+    unsafe {
+        let menu = GetSystemMenu(hwnd, 0);
+        if !menu.is_null() {
+            EnableMenuItem(menu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
+        }
+    }
+}
+
 /// 关闭模态对话框时调用：重新启用属主窗口并交还前台
 pub fn release_modal_dialog(owner: *mut core::ffi::c_void) {
     #[link(name = "user32")]

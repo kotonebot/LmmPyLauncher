@@ -43,8 +43,8 @@ pub struct Strings {
     pub confirm_exit: &'static str,
 
     // ---- 地区选择窗口 ----
-    pub region_title: &'static str,
-    pub region_question: &'static str,
+    pub region_instruction: &'static str,
+    pub region_body: &'static str,
     pub region_cn: &'static str,
     pub region_intl: &'static str,
 
@@ -249,8 +249,8 @@ const ZH: Strings = Strings {
     confirm_exit_title: "提示",
     confirm_exit: "正在安装或升级「{}」，确定要退出吗？",
 
-    region_title: "选择地区",
-    region_question: "首次使用，请选择您所在的地区。\n这将决定软件下载源（PyPI 镜像等），之后可在启动器旁的 launcher.conf.json 中修改。",
+    region_instruction: "为了提升网络下载体验，请选择你所在的地区。",
+    region_body: "这将决定软件下载源（PyPI 镜像等），之后可在启动器旁的 launcher.conf.json 中修改。",
     region_cn: "中国大陆",
     region_intl: "其他地区",
 
@@ -384,8 +384,8 @@ const EN: Strings = Strings {
     confirm_exit_title: "Confirm",
     confirm_exit: "\"{}\" is installing or upgrading. Are you sure you want to quit?",
 
-    region_title: "Select Region",
-    region_question: "First launch: please select your region.\nThis decides the download sources (PyPI mirrors etc.); you can change it later in launcher.conf.json next to the launcher.",
+    region_instruction: "To improve your download experience, please select your region.",
+    region_body: "This decides the download sources (PyPI mirrors etc.). You can change it later in launcher.conf.json next to the launcher.",
     region_cn: "Mainland China",
     region_intl: "Other regions",
 

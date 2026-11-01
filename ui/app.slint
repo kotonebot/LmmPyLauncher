@@ -167,16 +167,59 @@ export component MainWindow inherits Window {
     }
 }
 
+// 命令链接（Task Dialog command link）：整行可点击，悬停高亮，绿色箭头 + 标签
+component CommandLink inherits Rectangle {
+    in property <string> label;
+    in property <bool> framed; // 默认项带边框
+    callback clicked();
+
+    border-radius: 4px;
+    border-width: root.framed ? 1px : 0px;
+    border-color: Palette.alternate-background;
+    background: touch.has-hover ? Palette.alternate-background : transparent;
+    min-height: 40px;
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 12px;
+        alignment: center;
+
+        Text {
+            text: "\u{E72A}";
+            font-family: "Segoe MDL2 Assets";
+            font-size: 14px;
+            color: #107C10;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.label;
+            font-size: 14px;
+            color: Palette.foreground;
+            vertical-alignment: center;
+        }
+    }
+}
+
 // 地区选择窗口：首次启动询问用户所在地区（决定 PyPI / Python 发行版下载源），
-// 选择结果持久化到 exe 旁的 launcher.conf.json
+// 选择结果持久化到 exe 旁的 launcher.conf.json。
+// 设计参考 Windows Task Dialog：原生标题栏（标题=应用名）、大号主指令 + 灰色说明、
+// 命令链接选项；窗口不允许关闭（on_close_requested 返回 KeepWindowShown）
 export component RegionWindow inherits Window {
     title: root.window-title;
-    width: 460px;
-    height: 220px;
+    width: 500px;
+    height: 288px;
     background: Palette.background;
 
     in-out property <string> window-title;
-    in property <string> question;
+    // 大号主指令（Task Dialog main instruction）
+    in property <string> instruction;
+    // 灰色说明文字
+    in property <string> body;
     in property <string> label-cn;
     in property <string> label-intl;
 
@@ -184,29 +227,35 @@ export component RegionWindow inherits Window {
     callback choose-intl();
 
     VerticalLayout {
-        padding: 24px;
-        spacing: 20px;
+        padding: 28px;
+        padding-top: 24px;
+        spacing: 8px;
 
         Text {
-            text: root.question;
-            font-size: 13px;
-            color: Palette.foreground;
+            text: root.instruction;
+            font-size: 18px;
+            color: #0067C0;
             wrap: word-wrap;
-            horizontal-alignment: center;
-            vertical-stretch: 1;
         }
+        Rectangle { height: 8px; }
+        Text {
+            text: root.body;
+            font-size: 12px;
+            color: Palette.foreground;
+            opacity: 0.75;
+            wrap: word-wrap;
+        }
+        Rectangle { height: 18px; }
 
-        HorizontalLayout {
-            spacing: 12px;
-
-            Button {
-                text: root.label-cn;
-                clicked => { root.choose-cn(); }
-            }
-            Button {
-                text: root.label-intl;
-                clicked => { root.choose-intl(); }
-            }
+        CommandLink {
+            label: root.label-cn;
+            framed: true;
+            clicked => { root.choose-cn(); }
+        }
+        Rectangle { height: 4px; }
+        CommandLink {
+            label: root.label-intl;
+            clicked => { root.choose-intl(); }
         }
     }
 }
