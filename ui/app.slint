@@ -171,13 +171,13 @@ export component MainWindow inherits Window {
 component CommandLink inherits Rectangle {
     in property <string> label;
     in property <string> note; // 选项说明（Task Dialog command link 的 note 行）
-    in property <bool> framed; // 默认项带边框
     callback clicked();
 
     border-radius: 4px;
-    border-width: root.framed ? 1px : 0px;
+    // 常驻可见边框，让选项行平时就明显区别于窗口背景；悬停加强为主题蓝
+    border-width: 1px;
     border-color: touch.has-hover ? #0067C0 : Palette.alternate-background;
-    background: touch.has-hover ? Palette.alternate-background : transparent;
+    background: touch.has-hover ? Palette.alternate-background : Palette.background;
     min-height: 56px;
 
     touch := TouchArea {
@@ -200,18 +200,21 @@ component CommandLink inherits Rectangle {
         VerticalLayout {
             alignment: center;
             spacing: 2px;
+            horizontal-stretch: 1;
 
             Text {
                 text: root.label;
                 font-size: 15px;
                 font-weight: 600;
                 color: Palette.foreground;
+                horizontal-alignment: left;
             }
             Text {
                 text: root.note;
                 font-size: 11px;
                 color: Palette.foreground;
                 opacity: 0.6;
+                horizontal-alignment: left;
             }
         }
     }
@@ -264,7 +267,6 @@ export component RegionWindow inherits Window {
         CommandLink {
             label: root.label-cn;
             note: root.note-cn;
-            framed: true;
             clicked => { root.choose-cn(); }
         }
         Rectangle { height: 4px; }
