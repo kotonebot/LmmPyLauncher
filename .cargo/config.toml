@@ -9,3 +9,7 @@ git-fetch-with-cli = true
 
 [http]
 check-revoke = false
+
+[build]
+# target 目录放在仓库内（构建产物不进 git，已忽略）
+target-dir = "target"
