@@ -19,7 +19,9 @@ use std::sync::OnceLock;
 
 use crate::i18n::{fill, strings};
 
-const CONFIG_JSON: &str = include_str!("../launcher.json");
+/// launcher.json 绝对路径由 build.rs 注入：集成方通过环境变量 LMM_LAUNCHER_JSON
+/// 指向源码树之外的配置，未设置时为源码根的 launcher.json
+const CONFIG_JSON: &str = include_str!(env!("LMM_LAUNCHER_CONFIG"));
 
 #[derive(Debug)]
 pub struct AppConfig {

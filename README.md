@@ -16,8 +16,8 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
 
 ## 使用（集成方）
 
-1. 复制 `launcher.example.json` 为 `launcher.json`（编译期配置，嵌入二进制；
-   `launcher.json` 不进 git，缺失时构建脚本会自动从示例生成一份占位配置）：
+1. 准备你的配置目录（建议与 logo/icon 资源放在一起），以 `launcher.example.json`
+   为模板填写。配置在编译期嵌入二进制：
 
 ```json
 {
@@ -45,7 +45,13 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
 | `icon` | exe 图标（.ico，可选） |
 | `logoPath` | splash logo 图片（PNG/JPEG/SVG，可选；留空则不展示 logo） |
 
-2. 构建：`cargo build --release`（产物 `target/release/LmmPyLauncher.exe`）
+2. 构建：`LMM_LAUNCHER_JSON=<配置绝对路径> cargo build --release`
+   （产物 `target/release/LmmPyLauncher.exe`）
+
+   - `logoPath` / `icon` 相对**配置文件所在目录**解析，配置与资源文件放在一起即可
+   - 不设置 `LMM_LAUNCHER_JSON` 时使用源码根的 `launcher.json`（缺失则自动从
+     示例生成占位配置），便于直接开发调试
+   - 集成方源码树保持干净：构建过程只读配置路径，不向启动器仓库写入任何文件
 3. 分发：exe 与主程序包同目录放置，用户双击即用
 
 ## 运行时参数
