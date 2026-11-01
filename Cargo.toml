@@ -1,0 +1,36 @@
+[package]
+name = "LmmPyLauncher"
+version = "0.6.0"
+edition = "2021"
+description = "LmmPyLauncher — 通用 Python 桌面应用启动器（Slint GUI）"
+
+[[bin]]
+name = "LmmPyLauncher"
+path = "src/main.rs"
+
+[dependencies]
+# 精简 feature：仅 winit 后端 + femtovg 渲染器，去掉 accessibility 等额外组件
+slint = { version = "1", default-features = false, features = [
+    "std",
+    "compat-1-0",
+    "backend-winit",
+    "renderer-femtovg",
+] }
+ureq = "2"
+serde_json = "1"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+tempfile = "3"
+
+[build-dependencies]
+slint-build = "1"
+serde_json = "1"
+
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

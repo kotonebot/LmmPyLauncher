@@ -1,0 +1,266 @@
+import { Button, TextEdit } from "std-widgets.slint";
+import { Palette } from "std-widgets.slint";
+
+// Adobe 启动画面风格：大面积留白、居中字标、极细进度线、低调的状态文字与版本号。
+// 颜色全部取自 Palette，跟随系统亮/暗模式。
+// 文案由 Rust 侧注入（i18n，跟随系统语言）；应用名来自编译期配置 launcher.json。
+export component MainWindow inherits Window {
+    // 无边框效果由 Win32 侧（win32.rs）实现：保留系统样式 + WM_NCCALCSIZE 抹边框
+    // + WM_NCHITTEST 命中测试 + DwmExtendFrameIntoClientArea。
+    // no-frame 让 winit 的窗口 flags 不含 MARKER_DECORATIONS：winit 在
+    // adjust_rect 计算客户区→外框尺寸时会剔除 WS_CAPTION|WS_SIZEBOX，
+    // 避免 Slint 改变窗口尺寸（如展开详情）时 winit 按有边框窗口补偿
+    // AdjustWindowRectExForDpi 的边框厚度，导致窗口实际尺寸偏大、右侧出现白边。
+    no-frame: true;
+    title: root.app-name;
+    width: 520px;
+    // 详情展开时窗口向下扩展高度（顶边不动），收起时还原；主区域内容不被挤压。
+    // 有 logo 时主区多占 116px（96 logo + 20 间距），窗口随之加高
+    height: (root.log-open ? 460px : 340px) + (root.logo.width > 0 ? 116px : 0px);
+    background: Palette.background;
+
+    in property <string> app-name;
+    // splash logo（可选）：编译期嵌入，未配置时为空图片（宽度 0）不渲染
+    in property <image> logo;
+    in property <string> status <=> status-text.text;
+    in property <float> progress; // 0-100
+    in-out property <string> log-text;
+    in property <bool> busy;
+    in-out property <bool> log-open;
+
+    // i18n 文案（Rust 侧注入）
+    in property <string> label-details;
+    in property <string> label-collapse-details;
+
+    callback minimize-window();
+    callback close-window();
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // 自绘标题栏（无边框窗口）：拖动由 Win32 WM_NCHITTEST(HTCAPTION) 原生处理，
+        // 不展示标题文本；右侧最小化/关闭为普通按钮（HTCLIENT，Slint 正常处理点击）
+        HorizontalLayout {
+            height: 36px;
+            Rectangle { } // 弹性占位（拖动区）
+            // 最小化按钮（图标字体：Segoe MDL2 Assets ChromeMinimize，Win10/11 自带）
+            Rectangle {
+                width: 44px;
+                background: min-touch.has-hover ? Palette.alternate-background : transparent;
+                min-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.minimize-window(); }
+                }
+                Text {
+                    text: "\u{E921}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 10px;
+                    color: Palette.foreground;
+                    opacity: 0.8;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            // 关闭按钮（ChromeClose；悬停红底白字，与常见应用窗口控制按钮一致）
+            Rectangle {
+                width: 44px;
+                background: close-touch.has-hover ? #c42b1c : transparent;
+                close-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.close-window(); }
+                }
+                Text {
+                    text: "\u{E8BB}";
+                    font-family: "Segoe MDL2 Assets";
+                    font-size: 10px;
+                    color: close-touch.has-hover ? white : Palette.foreground;
+                    opacity: close-touch.has-hover ? 1 : 0.8;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // 主区域：居中字标 + 细进度线 + 状态文字
+        Rectangle {
+            VerticalLayout {
+                alignment: center;
+                spacing: 0px;
+                padding-left: 48px;
+                padding-right: 48px;
+
+                // 可选 logo（launcher.json logoPath 编译期嵌入），居中展示在字标上方
+                if root.logo.width > 0: HorizontalLayout {
+                    alignment: center;
+                    Image {
+                        source: root.logo;
+                        width: 96px;
+                        height: 96px;
+                        image-fit: contain;
+                    }
+                }
+                if root.logo.width > 0: Rectangle { height: 20px; }
+
+                Text {
+                    text: root.app-name;
+                    font-size: 26px;
+                    font-weight: 700;
+                    color: Palette.foreground;
+                    horizontal-alignment: center;
+                }
+
+                Rectangle { height: 28px; }
+
+                // Adobe 式极细进度线
+                Rectangle {
+                    height: 2px;
+                    background: Palette.alternate-background;
+                    Rectangle {
+                        x: 0;
+                        width: parent.width * min(1.0, max(0.0, root.progress / 100.0));
+                        background: Palette.foreground;
+                        animate width { duration: 200ms; easing: ease-out; }
+                    }
+                }
+
+                Rectangle { height: 14px; }
+
+                status-text := Text {
+                    font-size: 12px;
+                    color: Palette.foreground;
+                    opacity: 0.55;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        // 日志面板（可展开）
+        if root.log-open: Rectangle {
+            height: 200px;
+            TextEdit {
+                y: 8px;
+                x: 16px;
+                width: parent.width - 32px;
+                height: parent.height - 16px;
+                text <=> root.log-text;
+                read-only: true;
+                wrap: word-wrap;
+                font-size: 11px;
+            }
+        }
+
+        // 底部栏：详情开关
+        HorizontalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 8px;
+            padding-bottom: 12px;
+            alignment: LayoutAlignment.end;
+
+            Button {
+                text: root.log-open ? root.label-collapse-details : root.label-details;
+                checked: root.log-open;
+                clicked => { root.log-open = !root.log-open; }
+            }
+        }
+    }
+}
+
+// 地区选择窗口：首次启动询问用户所在地区（决定 PyPI / Python 发行版下载源），
+// 选择结果持久化到 exe 旁的 launcher.conf.json
+export component RegionWindow inherits Window {
+    title: root.window-title;
+    width: 460px;
+    height: 220px;
+    background: Palette.background;
+
+    in-out property <string> window-title;
+    in property <string> question;
+    in property <string> label-cn;
+    in property <string> label-intl;
+
+    callback choose-cn();
+    callback choose-intl();
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 20px;
+
+        Text {
+            text: root.question;
+            font-size: 13px;
+            color: Palette.foreground;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+            vertical-stretch: 1;
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+
+            Button {
+                text: root.label-cn;
+                clicked => { root.choose-cn(); }
+            }
+            Button {
+                text: root.label-intl;
+                clicked => { root.choose-intl(); }
+            }
+        }
+    }
+}
+
+// 崩溃报告窗口：主程序异常退出时展示输出尾部（主窗口此时已隐藏）
+export component CrashWindow inherits Window {
+    title: root.window-title;
+    width: 680px;
+    height: 520px;
+    background: Palette.background;
+
+    in-out property <string> window-title;
+    // 提示行（"「X」似乎崩溃了（退出码 N）"）
+    in property <string> hint;
+    // 主程序输出尾部日志
+    in-out property <string> crash-text;
+    in property <string> label-ok;
+
+    callback dismiss();
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+
+        Text {
+            text: root.hint;
+            font-size: 14px;
+            font-weight: 600;
+            color: Palette.foreground;
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: 4px;
+            background: Palette.alternate-background;
+            TextEdit {
+                x: 8px;
+                y: 8px;
+                width: parent.width - 16px;
+                height: parent.height - 16px;
+                text <=> root.crash-text;
+                read-only: true;
+                wrap: word-wrap;
+                font-size: 11px;
+            }
+        }
+
+        HorizontalLayout {
+            alignment: LayoutAlignment.end;
+
+            Button {
+                text: root.label-ok;
+                clicked => { root.dismiss(); }
+            }
+        }
+    }
+}
