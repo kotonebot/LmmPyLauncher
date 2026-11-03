@@ -39,7 +39,7 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
 | `python_version` | 自动部署的 embed Python 版本 |
 | `python_dist_dir` | 内嵌 Python 发行版目录（相对 exe，可空） |
 | `install_packages` | 要安装/更新的 pip 包名数组（纯名称，无版本约束） |
-| `uninstall_packages` | 安装前统一卸载的旧包名数组（历史包名迁移用） |
+| `uninstall_packages` | 安装前统一卸载的旧包名数组（历史包名迁移用，可为空数组） |
 | `entry_point` | `python -m` 的模块路径 |
 | `launch_command` | 启动命令模板，占位符 `{python}` / `{entry_point}` / `{extra_args}` |
 | `icon` | exe 图标（.ico，可选） |

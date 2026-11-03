@@ -45,27 +45,34 @@ pub fn get() -> &'static AppConfig {
             python_version: v["python_version"].as_str().unwrap_or("3.10.11").to_string(),
             python_dist_dir: v["python_dist_dir"].as_str().unwrap_or("").to_string(),
             install_packages: string_array(&v, "install_packages"),
-            uninstall_packages: string_array(&v, "uninstall_packages"),
+            // uninstall_packages 是可选字段（历史包名迁移用，可为空数组），
+            // 只有 install_packages 强制非空。
+            uninstall_packages: string_array_opt(&v, "uninstall_packages"),
             entry_point: required(&v, "entry_point"),
             launch_command: required(&v, "launch_command"),
         }
     })
 }
 
-/// 字符串数组字段：缺失或为空数组时 panic（install_packages 必须非空）
+/// 必填字符串数组字段：缺失或为空数组时 panic（install_packages 必须非空）
 fn string_array(v: &Value, key: &str) -> Vec<String> {
-    let arr: Vec<String> = v[key]
+    let arr = string_array_opt(v, key);
+    if arr.is_empty() {
+        panic!("{}", fill(strings().config_missing_field, &[key]));
+    }
+    arr
+}
+
+/// 可选字符串数组字段：缺失或为空数组时返回空 Vec（uninstall_packages 用）
+fn string_array_opt(v: &Value, key: &str) -> Vec<String> {
+    v[key]
         .as_array()
         .map(|a| {
             a.iter()
                 .filter_map(|x| x.as_str().map(String::from))
                 .collect()
         })
-        .unwrap_or_default();
-    if arr.is_empty() {
-        panic!("{}", fill(strings().config_missing_field, &[key]));
-    }
-    arr
+        .unwrap_or_default()
 }
 
 /// 必填字符串字段：缺失、非字符串或为空时立即 panic
