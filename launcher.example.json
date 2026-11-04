@@ -7,7 +7,8 @@
   ],
   "uninstall_packages": [],
   "entry_point": "my_app.main",
-  "launch_command": "{python} -m {entry_point} {extra_args}",
+  "launch_command": "{python} -m {entry_point} gui",
+  "launch_command_cli": "{python} -m {entry_point} {extra_args}",
   "icon": "",
   "logoPath": ""
 }

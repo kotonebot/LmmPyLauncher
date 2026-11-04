@@ -53,14 +53,11 @@ fn embed_zip_urls(version: &str) -> Vec<String> {
 /// 消息框询问用户是否在本目录部署 Python
 #[cfg(windows)]
 fn prompt_user(app_name: &str, dir: &Path) -> bool {
-    use crate::win32;
-    const MB_OKCANCEL: u32 = 0x0000_0001;
-    const MB_ICONQUESTION: u32 = 0x0000_0020;
-    const IDOK: i32 = 1;
     let s = strings();
     let text = fill(s.deploy_prompt, &[app_name, &dir.display().to_string()]);
-    // 挂主窗口为属主：此时主窗口是前台，无属主的消息框会被它完全遮挡
-    win32::message_box_owned(crate::hwnd_of(), &text, s.deploy_prompt_title, MB_OKCANCEL | MB_ICONQUESTION) == IDOK
+    // 交互形式交给 bin：GUI 弹原生消息框（挂主窗口为属主，否则会被主窗口遮挡），
+    // CLI 在终端询问。这样 lib 不依赖任何窗口框架。
+    crate::host::get().confirm(&text, s.deploy_prompt_title)
 }
 
 /// 确保有可用的 Python：弹窗确认后自动部署 embed 版，返回解释器路径

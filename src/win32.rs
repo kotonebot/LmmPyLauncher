@@ -223,7 +223,8 @@ pub fn confirm_exit_and_quit(busy: bool) {
             return;
         }
     }
-    let _ = slint::quit_event_loop();
+    // 退出主循环的具体动作由 bin 决定（GUI 关 Slint 事件循环；CLI 无此概念）
+    crate::host::get().request_quit();
 }
 
 unsafe extern "system" fn wnd_proc(hwnd: *mut core::ffi::c_void, msg: u32, wp: usize, lp: isize) -> isize {

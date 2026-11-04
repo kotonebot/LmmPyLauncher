@@ -1,12 +1,13 @@
 //! 运行时配置（区别于编译期 launcher.json）：exe 旁的 `launcher.conf.json`。
 //!
 //! 目前只有一项：`region`（"cn" | "intl"），决定 PyPI 镜像与 Python
-//! 发行版下载源。首次启动（配置文件不存在）时弹出地区选择窗口，
-//! 用户选择后持久化，此后不再询问。
+//! 发行版下载源。首次启动（配置文件不存在）时通过 [`crate::host::Host::ask_region`]
+//! 询问用户（GUI 弹模态窗口，CLI 走 stdin），选择后持久化，此后不再询问。
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+/// 用户所在地区，决定下载源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Region {
     /// 中国大陆：使用国内 PyPI 镜像与 Python 发行版镜像
@@ -16,7 +17,8 @@ pub enum Region {
 }
 
 impl Region {
-    fn as_str(self) -> &'static str {
+    /// 序列化用的短名。
+    pub fn as_str(self) -> &'static str {
         match self {
             Region::Cn => "cn",
             Region::Intl => "intl",
@@ -31,13 +33,14 @@ pub fn get() -> Region {
     *REGION.get().expect(&*crate::i18n::fill(crate::i18n::strings().region_not_init, &[]))
 }
 
-/// 加载地区配置；没有有效配置时弹窗询问用户并持久化。
-/// 可在任意线程调用（弹窗通过 invoke_from_event_loop 切到 UI 线程）。
+/// 加载地区配置；没有有效配置时询问用户并持久化。
+///
+/// 询问动作委托给 [`crate::host::Host::ask_region`]，因此 GUI / CLI 可各自实现。
 pub fn ensure() -> Region {
     if let Some(r) = REGION.get() {
         return *r;
     }
-    let region = load().unwrap_or_else(ask_user);
+    let region = load().unwrap_or_else(|| crate::host::get().ask_region());
     let _ = REGION.set(region);
     save(region);
     crate::logging::info(&format!("地区: {}", region.as_str()));
@@ -73,93 +76,3 @@ fn save(region: Region) {
     let text = format!("{{\n  \"region\": \"{}\"\n}}\n", region.as_str());
     let _ = std::fs::write(path, text);
 }
-
-/// 首次启动：弹地区选择窗口，阻塞工作线程直到用户选择
-fn ask_user() -> Region {
-    let (tx, rx) = std::sync::mpsc::channel::<Region>();
-    let _ = slint::invoke_from_event_loop(move || {
-        if let Err(e) = show_region_window(tx.clone()) {
-            crate::logging::error(&format!("无法显示地区选择窗口: {e}"));
-        }
-    });
-    // 用户未选择就关闭事件循环（极少见）时默认 intl
-    rx.recv().unwrap_or(Region::Intl)
-}
-
-#[cfg(windows)]
-fn show_region_window(tx: std::sync::mpsc::Sender<Region>) -> Result<(), String> {
-    use slint::SharedString;
-    let s = crate::i18n::strings();
-    // 主窗口先于本对话框存在，记录为模态属主
-    let owner = crate::hwnd_of();
-    let w = RegionWindow::new().map_err(|e| e.to_string())?;
-    // Task Dialog 惯例：原生标题栏标题 = 应用名，主指令才是提问文案
-    w.set_window_title(SharedString::from(crate::app_config::get().app_name.as_str()));
-    w.set_instruction(SharedString::from(s.region_instruction));
-    w.set_body(SharedString::from(s.region_body));
-    w.set_label_cn(SharedString::from(s.region_cn));
-    w.set_label_intl(SharedString::from(s.region_intl));
-    w.set_note_cn(SharedString::from(s.region_cn_note));
-    w.set_note_intl(SharedString::from(s.region_intl_note));
-    {
-        let tx = tx.clone();
-        let weak = w.as_weak();
-        let owner = owner;
-        w.on_choose_cn(move || {
-            let _ = tx.send(Region::Cn);
-            if let Some(o) = owner {
-                crate::win32::release_modal_dialog(o);
-            }
-            if let Some(w) = weak.upgrade() {
-                let _ = w.hide();
-            }
-        });
-    }
-    {
-        let weak = w.as_weak();
-        let owner = owner;
-        w.on_choose_intl(move || {
-            let _ = tx.send(Region::Intl);
-            if let Some(o) = owner {
-                crate::win32::release_modal_dialog(o);
-            }
-            if let Some(w) = weak.upgrade() {
-                let _ = w.hide();
-            }
-        });
-    }
-    // 模态选择框不允许关闭（没有有效选择就没有持久化配置）：
-    // 点原生标题栏 X 一律忽略
-    w.window().on_close_requested(|| slint::CloseRequestResponse::KeepWindowShown);
-
-    w.show().map_err(|e| e.to_string())?;
-
-    // Slint/winit 没有模态窗口 API，走 Win32 原生机制（系统对话框同款）：
-    // owned window + EnableWindow 禁用属主 + 居中到属主。Slint 窗口惰性创建，
-    // 用 Timer 轮询等 HWND 出现（对齐 main.rs 的做法）
-    if let Some(owner) = owner {
-        let timer = std::rc::Rc::new(slint::Timer::default());
-        let timer2 = timer.clone();
-        timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(1),
-            move || {
-                if let Some(dialog) = crate::hwnd_of_excluding(Some(owner)) {
-                    timer2.stop();
-                    crate::win32::setup_modal_dialog(dialog, owner);
-                    crate::win32::disable_close_button(dialog);
-                }
-            },
-        );
-        // Timer 被 drop 会停止，泄漏一份活到对话框关闭
-        std::mem::forget(timer);
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn show_region_window(_tx: std::sync::mpsc::Sender<Region>) -> Result<(), String> {
-    Ok(())
-}
-
-slint::include_modules!();

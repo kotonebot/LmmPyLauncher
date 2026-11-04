@@ -32,6 +32,12 @@ pub struct AppConfig {
     pub uninstall_packages: Vec<String>,
     pub entry_point: String,
     pub launch_command: String,
+    /// CLI 版专用的启动命令模板（可含 `{extra_args}`）。
+    ///
+    /// GUI 版用 `launch_command`（纯 GUI 入口，不含占位符，参数无处可去）；
+    /// CLI 版需要把用户参数拼接进命令行，因此单独给一条模板。缺省时回退到
+    /// `launch_command`，此时参数会被丢弃。
+    pub launch_command_cli: Option<String>,
 }
 
 static CONFIG: OnceLock<AppConfig> = OnceLock::new();
@@ -48,10 +54,20 @@ pub fn get() -> &'static AppConfig {
             // uninstall_packages 是可选字段（历史包名迁移用，可为空数组），
             // 只有 install_packages 强制非空。
             uninstall_packages: string_array_opt(&v, "uninstall_packages"),
+            launch_command_cli: optional_string(&v, "launch_command_cli"),
             entry_point: required(&v, "entry_point"),
             launch_command: required(&v, "launch_command"),
         }
     })
+}
+
+/// 可选字符串字段：缺失或为空时返回 None（launch_command_cli 用）
+fn optional_string(v: &Value, key: &str) -> Option<String> {
+    v[key]
+        .as_str()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }
 
 /// 必填字符串数组字段：缺失或为空数组时 panic（install_packages 必须非空）

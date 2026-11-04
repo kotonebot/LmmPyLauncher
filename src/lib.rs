@@ -1,4 +1,8 @@
-//! LmmPyLauncher — 通用 Python 桌面应用启动器（Rust + Slint GUI 版）
+//! LmmPyLauncher — 通用 Python 桌面应用启动器：公共逻辑库。
+//!
+//! 本 crate 不依赖 Slint，由两个二进制复用：
+//! - `LmmPyLauncher`（`src/bin/gui.rs`，windows 子系统，Slint splash）
+//! - `LmmPyLauncherCli`（`src/bin/cli.rs`，console 子系统，stderr 输出）
 //!
 //! 职责：
 //! 1. 首次启动询问地区（决定 PyPI / Python 发行版下载源）
@@ -6,90 +10,129 @@
 //! 3. 安装与更新 pip 和主程序（包名来自编译期配置 launcher.json）
 //! 4. 启动主程序
 //! 5. 恢复模式（手动选择版本安装，流程保留）
+//!
+//! 需要与用户交互的地方（询问地区、部署确认、崩溃报告、退出主循环）都通过
+//! [`host::Host`] 抽象，由各 bin 在启动时注册自己的实现。
 
-// 纯 GUI 程序：不分配控制台窗口（日志写入 logs/ 下的文件）
-#![windows_subsystem = "windows"]
-
-mod app_config;
-mod deploy;
-mod i18n;
+pub mod app_config;
+pub mod deploy;
+pub mod host;
+pub mod i18n;
 #[cfg(windows)]
-mod job;
-mod logging;
-mod pip;
-mod settings;
+pub mod job;
+pub mod logging;
+pub mod pip;
+pub mod settings;
 #[cfg(windows)]
-mod win32;
-mod version;
+pub mod win32;
+pub mod version;
 
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-
-use slint::{SharedString, Weak};
 
 use crate::pip::{HideConsoleWindow, Pip};
 use crate::settings::Region;
 
-const BOOTSTRAP_VERSION: &str = env!("CARGO_PKG_VERSION");
-/// splash logo：编译期由 build.rs 从 launcher.json 的 logoPath 注入路径（无则空文件）
-const LOGO_DATA: &[u8] = include_bytes!(env!("LMM_LOGO_PATH"));
+pub const BOOTSTRAP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// 安装/升级进行中标志：WM_CLOSE 的退出确认需要跨模块读取（win32::wnd_proc）
-pub(crate) static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-slint::include_modules!();
+/// 运行模式。编译期由 bin 决定，影响子进程 stdio、参数透传与退出方式。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    /// GUI：子进程输出走管道（供崩溃报告展示），等待首个可见窗口后隐藏启动器，
+    /// 不接受额外命令行参数。
+    Gui,
+    /// CLI：子进程输出直连控制台，不等待窗口，退出码透传，全部参数转发给主程序。
+    Cli,
+}
 
-/// UI 事件（工作线程 → UI 线程）
-enum UiMsg {
+/// UI 事件（工作线程 → 消费端）
+pub enum UiMsg {
+    /// 追加一行日志
     Log(String),
+    /// 更新状态栏文案
     Status(String),
+    /// 更新进度（0-100）
     Progress(f32),
+    /// 忙碌状态（GUI 用于禁用关闭按钮）
     Busy(bool),
     /// 恢复模式 UI 已移除，但恢复流程代码保留，消息通道维持不变
     #[allow(dead_code)]
     Versions(Vec<String>),
 }
 
-struct Ui {
-    #[allow(dead_code)]
-    weak: Weak<MainWindow>,
+/// 工作线程与 UI 之间的单向通道。
+///
+/// 这里只持有发送端：GUI bin 把消息渲染到 Slint，CLI bin 直接打印到 stderr，
+/// 因此 lib 侧不需要依赖任何 UI 框架。
+pub struct Ui {
     tx: Sender<UiMsg>,
 }
 
 impl Ui {
-    fn log(&self, line: &str) {
+    /// 创建通道，返回 `(Ui, 接收端)`。接收端由 bin 起线程消费。
+    pub fn new() -> (Arc<Ui>, Receiver<UiMsg>) {
+        let (tx, rx) = channel::<UiMsg>();
+        (Arc::new(Ui { tx }), rx)
+    }
+
+    /// 追加一行日志
+    pub fn log(&self, line: &str) {
         let _ = self.tx.send(UiMsg::Log(line.to_string()));
     }
-    fn status(&self, s: &str) {
+
+    /// 更新状态文案
+    pub fn status(&self, s: &str) {
         let _ = self.tx.send(UiMsg::Status(s.to_string()));
     }
-    fn progress(&self, p: f32) {
+
+    /// 更新进度（0-100）
+    pub fn progress(&self, p: f32) {
         let _ = self.tx.send(UiMsg::Progress(p));
     }
-    fn busy(&self, b: bool) {
+
+    /// 更新忙碌状态
+    pub fn busy(&self, b: bool) {
         let _ = self.tx.send(UiMsg::Busy(b));
     }
+
     /// 恢复模式 UI 已移除，恢复流程保留以备后用
     #[allow(dead_code)]
-    fn versions(&self, v: Vec<String>) {
+    pub fn versions(&self, v: Vec<String>) {
         let _ = self.tx.send(UiMsg::Versions(v));
     }
 }
 
 /// 命令行参数
-#[derive(Clone)]
-struct Args {
-    install_version: Option<String>,
-    install_from_zip: Option<std::path::PathBuf>,
-    install_from_package: Option<std::path::PathBuf>,
-    skip_update: bool,
-    extra_args: Vec<String>,
+/// 命令行参数。
+pub struct Args {
+    /// 指定安装版本
+    pub install_version: Option<String>,
+    /// 从 zip 安装
+    pub install_from_zip: Option<std::path::PathBuf>,
+    /// 从 .whl / .tar.gz 安装
+    pub install_from_package: Option<std::path::PathBuf>,
+    /// 跳过更新检查
+    pub skip_update: bool,
+    /// 透传给主程序（仅 CLI 模式生效）
+    pub extra_args: Vec<String>,
 }
 
-fn parse_args() -> Result<Args, String> {
+/// 解析启动器自身参数。
+///
+/// 启动器独占的开关（`--install-*`、`--skip-update`）一律由启动器消费；
+/// `.zip` / `.whl` / `.tar.gz` 位置参数视为本地安装包。其余参数的处理取决于模式：
+/// GUI 模式拒绝（它是纯 GUI 入口，参数无从去处），CLI 模式原样透传给主程序。
+///
+/// :param mode: 运行模式。
+/// :return: 解析结果。
+/// :raises String: GUI 模式下出现非法位置参数时。
+pub fn parse_args(mode: Mode) -> Result<Args, String> {
     let s = i18n::strings();
     let mut args = Args {
         install_version: None,
@@ -119,21 +162,24 @@ fn parse_args() -> Result<Args, String> {
             args.install_from_package = argv.get(i).map(std::path::PathBuf::from);
         } else if a == "--skip-update" {
             args.skip_update = true;
-        } else if a.starts_with("--") {
-            // 未知开关原样传给主程序
-            args.extra_args.push(a.clone());
         } else {
-            // 位置参数：包文件
+            // 其余参数：先判断是否本地安装包，再决定透传还是报错
             let lower = a.to_ascii_lowercase();
-            if lower.ends_with(".zip") {
+            let is_zip = lower.ends_with(".zip");
+            let is_pkg = lower.ends_with(".whl") || lower.ends_with(".tar.gz");
+            if is_zip {
                 if args.install_from_zip.is_none() {
                     args.install_from_zip = Some(std::path::PathBuf::from(a));
                 }
-            } else if lower.ends_with(".whl") || lower.ends_with(".tar.gz") {
+            } else if is_pkg {
                 if args.install_from_package.is_none() {
                     args.install_from_package = Some(std::path::PathBuf::from(a));
                 }
+            } else if mode == Mode::Cli {
+                // CLI 模式：未知开关与位置参数全部转发给主程序
+                args.extra_args.push(a.clone());
             } else {
+                // GUI 模式：exe 不接受参数，明确报错而不是静默丢弃
                 return Err(i18n::fill(s.unsupported_file_type, &[a]));
             }
         }
@@ -292,21 +338,47 @@ fn install_pip_and_packages(pip: &mut Pip, ui: &Ui) -> Result<(), String> {
     Ok(())
 }
 
-/// 运行主程序，阻塞直到其退出；正常退出时启动器跟随退出，
-/// 异常退出时弹出崩溃报告窗口（展示输出尾部）
-fn run_app(ui: &Ui, extra_args: &[String]) -> Result<(), String> {
+/// 主程序退出结果。
+pub struct RunOutcome {
+    /// 主程序退出码（无法获取时为 -1）
+    pub code: i32,
+    /// 输出尾部（stdout+stderr 最近 100 行）。仅 GUI 模式收集，CLI 模式为空。
+    pub tail: String,
+}
+
+/// 运行主程序并阻塞等待其退出。
+///
+/// GUI 模式：子进程输出走管道（仅供崩溃报告展示），等待首个可见窗口后隐藏启动器，
+/// 不接受额外命令行参数；CLI 模式：子进程继承当前控制台，不等待窗口，参数全部转发。
+///
+/// :param ui: 事件通道，用于上报状态与日志。
+/// :param extra_args: 透传给主程序的参数（GUI 模式忽略）。
+/// :param mode: 运行模式。
+/// :return: 子进程退出码与输出尾部。
+/// :raises String: 解释器缺失、命令模板为空或进程无法启动时。
+pub fn run_app(ui: &Ui, extra_args: &[String], mode: Mode) -> Result<RunOutcome, String> {
     let s = i18n::strings();
     let config = app_config::get();
     let python = Pip::find_python().ok_or(s.python_not_found)?;
 
     ui.status(&i18n::fill(s.waiting_start, &[&config.app_name]));
 
-    // 按编译期配置的命令模板组装启动命令（launcher.json → launch_command）
+    // 命令模板：CLI 版优先用 launch_command_cli（含 {extra_args} 占位），
+    // 缺省时退回 launch_command。GUI 模板里没有占位符，参数自然被丢弃。
+    let template = match mode {
+        Mode::Cli => config.launch_command_cli.as_deref().unwrap_or(&config.launch_command),
+        Mode::Gui => config.launch_command.as_str(),
+    };
+    // GUI 版 exe 定位为纯 GUI 入口：任何外部参数都不下传
+    let extra: &[String] = match mode {
+        Mode::Gui => &[],
+        Mode::Cli => extra_args,
+    };
     let mut parts: Vec<String> = Vec::new();
-    for tok in config.launch_command.split_whitespace() {
+    for tok in template.split_whitespace() {
         match tok {
             "{python}" => parts.push(python.to_string_lossy().into_owned()),
-            "{extra_args}" => parts.extend(extra_args.iter().cloned()),
+            "{extra_args}" => parts.extend(extra.iter().cloned()),
             other => parts.push(other.replace("{entry_point}", &config.entry_point)),
         }
     }
@@ -319,43 +391,48 @@ fn run_app(ui: &Ui, extra_args: &[String]) -> Result<(), String> {
     cmd.args(cmd_args)
         .env("no_proxy", "localhost, 127.0.0.1, ::1")
         .env("PYTHONIOENCODING", "utf-8")
-        .env("PYTHONUNBUFFERED", "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .hide_console_window();
+        .env("PYTHONUNBUFFERED", "1");
+    match mode {
+        // GUI：输出被管道截获，只用于崩溃时展示尾部；不给子进程弹控制台
+        Mode::Gui => {
+            cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).hide_console_window();
+        }
+        // CLI：直接继承启动器所在的控制台，用户能看到输出、也能交互
+        Mode::Cli => {
+            cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+        }
+    }
     let mut child = cmd.spawn().map_err(|e| i18n::fill(s.spawn_fail, &[&e.to_string()]))?;
     // 挂入 Job Object：启动器退出时主程序一并被终止
     job::assign_child(&child);
 
-    // 等待主程序出现第一个可见顶层窗口后再隐藏启动器（最多 30s）。
-    // 若在窗口出现前就退出（启动即崩），不隐藏，直接走崩溃报告流程
-    #[cfg_attr(windows, allow(unused_assignments))]
-    #[cfg(windows)]
-    let mut appeared = false;
-    #[cfg(not(windows))]
-    let mut appeared = true;
-    #[cfg(windows)]
-    {
-        appeared = false;
-        let pid = child.id();
-        for _ in 0..300 {
-            if child_has_visible_window(pid) {
-                appeared = true;
-                break;
+    // GUI：等待主程序出现第一个可见顶层窗口后再隐藏启动器（最多 30s）。
+    // 若在窗口出现前就退出（启动即崩），不隐藏，直接走崩溃报告流程。
+    // CLI：子进程是控制台程序，没有窗口，跳过这段等待。
+    if mode == Mode::Gui {
+        #[cfg(windows)]
+        {
+            let pid = child.id();
+            let mut appeared = false;
+            for _ in 0..300 {
+                if child_has_visible_window(pid) {
+                    appeared = true;
+                    break;
+                }
+                if child.try_wait().map_or(false, |o| o.is_some()) {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            if child.try_wait().map_or(false, |o| o.is_some()) {
-                break;
+            if appeared {
+                // 主程序窗口已接管前台：隐藏启动器窗口
+                hide_launcher_window();
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
-    if appeared {
-        // 主程序窗口已接管前台：隐藏启动器窗口
-        #[cfg(windows)]
-        hide_launcher_window();
-    }
 
-    // 收集主程序输出尾部（stdout+stderr 合计最近 100 行），供崩溃提示窗口展示
+    // 收集主程序输出尾部（stdout+stderr 合计最近 100 行），供崩溃提示窗口展示。
+    // CLI 模式下句柄为 inherit，take() 得到 None，不会收集。
     let tail: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let mut handles = Vec::new();
     if let Some(out) = child.stdout.take() {
@@ -370,66 +447,38 @@ fn run_app(ui: &Ui, extra_args: &[String]) -> Result<(), String> {
     }
 
     let code = output.code().unwrap_or(-1);
+    let tail_text = tail.lock().map(|t| t.join("\n")).unwrap_or_default();
     if code == 0 {
         ui.progress(100.0);
         ui.status(&i18n::fill(s.app_exited, &[&config.app_name]));
         ui.log(&i18n::fill(s.app_exited, &[&config.app_name]));
-        // 正常退出：启动器跟着退出
-        let _ = slint::quit_event_loop();
-        return Ok(());
+    } else {
+        ui.log(&i18n::fill(s.crash_exit_log, &[&code.to_string()]));
+        logging::error(&i18n::fill(s.crash_exit_log, &[&code.to_string()]));
     }
-
-    // 异常退出：弹出崩溃报告窗口展示输出尾部，用户关闭后启动器退出
-    let tail_text = tail.lock().unwrap().join("\n");
-    let title = i18n::fill(s.crash_title, &[&config.app_name]);
-    let hint = i18n::fill(s.crash_hint, &[&config.app_name, &code.to_string()]);
-    ui.log(&i18n::fill(s.crash_exit_log, &[&code.to_string()]));
-    logging::error(&i18n::fill(s.crash_exit_log, &[&code.to_string()]));
-    {
-        let title = title.clone();
-        let hint = hint.clone();
-        let tail_text = tail_text.clone();
-        let _ = slint::invoke_from_event_loop(move || {
-            if let Err(e) = show_crash_window(&title, &hint, &tail_text) {
-                logging::error(&i18n::fill(i18n::strings().crash_window_fail, &[&e]));
-            }
-        });
-    }
-    Err(i18n::fill(s.crash_exit_log, &[&code.to_string()]))
+    Ok(RunOutcome { code, tail: tail_text })
 }
 
-/// 崩溃报告窗口（在 UI 线程调用）。用户点确定后启动器整体退出。
+
+/// 隐藏启动器主窗口（主程序运行期间不再需要它）。
+///
+/// 只对 GUI 版有意义：CLI 版进程没有窗口，`hwnd_of` 返回 None，调用为空操作。
 #[cfg(windows)]
-fn show_crash_window(title: &str, hint: &str, text: &str) -> Result<(), String> {
-    let s = i18n::strings();
-    let w = CrashWindow::new().map_err(|e| e.to_string())?;
-    w.set_window_title(SharedString::from(title));
-    w.set_hint(SharedString::from(hint));
-    w.set_crash_text(SharedString::from(text));
-    w.set_label_ok(SharedString::from(s.ok_btn));
-    w.on_dismiss(move || {
-        let _ = slint::quit_event_loop();
-    });
-    w.show().map_err(|e| e.to_string())
-}
-
-#[cfg(not(windows))]
-fn show_crash_window(_t: &str, _h: &str, _x: &str) -> Result<(), String> {
-    Ok(())
-}
-
-/// 隐藏启动器主窗口（主程序运行期间不再需要它）
-#[cfg(windows)]
-fn hide_launcher_window() {
+pub fn hide_launcher_window() {
     #[link(name = "user32")]
     extern "system" {
         fn ShowWindow(hwnd: *mut core::ffi::c_void, n_cmd_show: i32) -> i32;
     }
     const SW_HIDE: i32 = 0;
     if let Some(hwnd) = hwnd_of() {
-        unsafe { ShowWindow(hwnd, SW_HIDE); }
+        unsafe {
+            ShowWindow(hwnd, SW_HIDE);
+        }
     }
 }
+
+#[cfg(not(windows))]
+pub fn hide_launcher_window() {}
 
 /// 检查指定 PID 的进程是否已有可见的顶层窗口
 #[cfg(windows)]
@@ -477,14 +526,20 @@ fn spawn_tail_reader<R: std::io::Read + Send + 'static>(
     })
 }
 
-/// 主流程（在后台线程执行）
-fn run_main(ui: Arc<Ui>, args: Args) {
+/// 主流程（在后台线程执行）：询问地区 → 定位/部署 Python → 安装或更新 → 启动主程序。
+///
+/// :param ui: 事件通道。
+/// :param args: 已解析的命令行参数。
+/// :param mode: 运行模式，决定参数透传与子进程 stdio。
+/// :return: 主程序退出结果（安装阶段失败则返回 Err）。
+/// :raises String: 任一安装/更新/启动阶段失败时。
+pub fn run_main(ui: Arc<Ui>, args: Args, mode: Mode) -> Result<RunOutcome, String> {
     let s = i18n::strings();
     ui.busy(true);
     ui.progress(0.0);
     ui.status(s.initializing);
 
-    let result = (|| -> Result<(), String> {
+    let result = (|| -> Result<RunOutcome, String> {
         // 首次启动：询问地区并持久化（决定 PyPI / Python 发行版下载源）
         let _region: Region = settings::ensure();
 
@@ -524,20 +579,18 @@ fn run_main(ui: Arc<Ui>, args: Args) {
         }
 
         ui.progress(60.0);
-        run_app(&ui, &args.extra_args)?;
-        Ok(())
+        run_app(&ui, &args.extra_args, mode)
     })();
 
-    match result {
-        Ok(()) => {}
-        Err(e) => {
-            ui.status(&i18n::fill(s.fatal_error, &[&e]));
-            ui.log(&i18n::fill(s.fatal_error, &[&e]));
-            ui.log(s.feedback_hint);
-            logging::error(&e);
-        }
+    if let Err(e) = &result {
+        ui.status(&i18n::fill(s.fatal_error, &[e]));
+        ui.log(&i18n::fill(s.fatal_error, &[e]));
+        // 反馈指引随形态不同：GUI 让用户附窗口截图，CLI 只能附终端输出
+        ui.log(&host::get().feedback_hint(s.feedback_hint));
+        logging::error(e);
     }
     ui.busy(false);
+    result
 }
 
 /// 恢复模式：列出可用版本供用户选择
@@ -600,213 +653,22 @@ fn run_install_selected(ui: Arc<Ui>, version: String) {
     ui.busy(false);
 }
 
-fn spawn_worker(ui: Arc<Ui>, f: impl FnOnce(Arc<Ui>) + Send + 'static) {
+/// 在后台线程执行主流程。
+pub fn spawn_worker(ui: Arc<Ui>, f: impl FnOnce(Arc<Ui>) + Send + 'static) {
     std::thread::spawn(move || f(ui));
 }
 
-fn main() {
-    let s = i18n::strings();
-    // 把工作目录切到 exe 所在目录：主程序及日志文件均按相对路径读写
-    // （conf/、resources/、logs/），快捷方式/终端启动时 cwd 可能不是 exe 目录
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-    {
-        if let Err(e) = std::env::set_current_dir(&dir) {
-            let msg = i18n::fill(s.set_cwd_fail, &[&e.to_string()]);
-            #[cfg(windows)]
-            crate::win32::message_box(&msg, "Error", 0x0 | 0x10); // MB_OK | MB_ICONERROR
-            #[cfg(not(windows))]
-            eprintln!("{msg}");
-            std::process::exit(1);
-        }
-    }
-
-    let args = match parse_args() {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(2);
-        }
-    };
-    logging::init().ok();
-    logging::info(s.launcher_started);
-    logging::info(&i18n::fill(s.launcher_version, &[BOOTSTRAP_VERSION]));
-    // 创建 Job Object：此后 spawn 的子进程全部挂入，启动器退出时一并终止
-    #[cfg(windows)]
-    job::init();
-
-    let (tx, rx) = channel::<UiMsg>();
-
-    // 处理跳过更新的标志（特殊安装或 --skip-update 时不检查更新）
-    let mut args = args;
-    if args.install_version.is_some()
-        || args.install_from_zip.is_some()
-        || args.install_from_package.is_some()
-        || args.skip_update
-    {
-        args.skip_update = true;
-    }
-
-    let main_window = MainWindow::new().expect(s.window_create_fail);
-    let config = app_config::get();
-    main_window.set_app_name(SharedString::from(config.app_name.as_str()));
-    // 未配置 logoPath 时是空文件，跳过解码（避免 slint 打印解码错误），
-    // 用空图片（宽度 0），Slint 端不渲染
-    main_window.set_logo(if LOGO_DATA.is_empty() {
-        slint::Image::default()
-    } else {
-        slint::Image::load_from_data(LOGO_DATA, None).unwrap_or_default()
-    });
-    main_window.set_status(SharedString::from(s.ready));
-    main_window.set_label_details(SharedString::from(s.details));
-    main_window.set_label_collapse_details(SharedString::from(s.collapse_details));
-
-    let weak = main_window.as_weak();
-    let ui = Arc::new(Ui { weak, tx });
-
-    // UI 事件泵：把工作线程的消息转发到 UI
-    {
-        let weak = main_window.as_weak();
-        std::thread::spawn(move || {
-            while let Ok(msg) = rx.recv() {
-                let weak = weak.clone();
-                slint::invoke_from_event_loop(move || {
-                    let Some(w) = weak.upgrade() else { return };
-                    match msg {
-                        UiMsg::Log(line) => {
-                            let existing = w.get_log_text();
-                            w.set_log_text(SharedString::from(format!("{existing}{line}\n")));
-                        }
-                        UiMsg::Status(s) => w.set_status(SharedString::from(s)),
-                        UiMsg::Progress(p) => w.set_progress(p),
-                        UiMsg::Busy(b) => {
-                            BUSY.store(b, std::sync::atomic::Ordering::Relaxed);
-                            w.set_busy(b);
-                        }
-                        // 恢复模式 UI 已移除；Versions 消息保留以兼容恢复流程代码
-                        UiMsg::Versions(_) => {}
-                    }
-                })
-                .ok();
-            }
-        });
-    }
-
-    {
-        let weak = main_window.as_weak();
-        main_window.on_minimize_window(move || {
-            if let Some(w) = weak.upgrade() {
-                minimize_window(&w);
-            }
-        });
-    }
-    {
-        main_window.on_close_window(move || {
-            // 安装/升级进行中先确认（标题栏关闭按钮入口）；与 WM_CLOSE 共用逻辑
-            #[cfg(windows)]
-            win32::confirm_exit_and_quit(BUSY.load(std::sync::atomic::Ordering::Relaxed));
-            #[cfg(not(windows))]
-            let _ = slint::quit_event_loop();
-        });
-    }
-
-    // Windows：先放到屏幕外，无边框样式应用完成后再移入屏幕中央（见下方 Timer）
-    #[cfg(windows)]
-    place_offscreen(&main_window);
-
-    main_window.show().expect(s.window_show_fail);
-    #[cfg(not(windows))]
-    center_on_screen(&main_window);
-
-    // 无边框窗口 + DWM 接入。Slint/winit 的原生窗口在事件循环启动后才创建
-    // （WinitWindowOrNone::ensure_window 惰性创建），所以用 Timer 轮询等待窗口出现。
-    // 窗口先被放到屏幕外（place_offscreen），样式应用完成后再移入屏幕中央，
-    // 避免原生标题栏先闪现一帧。
-    #[cfg(windows)]
-    {
-        let timer = std::rc::Rc::new(slint::Timer::default());
-        let timer2 = timer.clone();
-        let weak = main_window.as_weak();
-        timer.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(1),
-            move || {
-                if let Some(hwnd) = hwnd_of() {
-                    timer2.stop();
-                    logging::info("找到主窗口 HWND，应用无边框/DWM 设置");
-                    win32::setup_frameless(hwnd);
-                    win32::set_window_icon(hwnd);
-                    if let Some(w) = weak.upgrade() {
-                        center_on_screen(&w);
-                    }
-                }
-            },
-        );
-        // Slint Timer 被 drop 时会停止，这里泄漏一份句柄让它活到进程结束
-        std::mem::forget(timer);
-    }
-
-    // 启动时自动执行主流程
-    // BUSY 初始为 true：默认流程全程 busy，避免启动初期 WM_CLOSE 绕过确认
-    BUSY.store(true, std::sync::atomic::Ordering::Relaxed);
-    {
-        let ui = Arc::clone(&ui);
-        let args = args.clone();
-        spawn_worker(ui, move |ui| run_main(ui, args));
-    }
-
-    run_main_window(main_window);
-}
-
-fn run_main_window(window: MainWindow) {
-    window.run().expect(i18n::strings().event_loop_fail);
-}
-
-/// 将窗口放到主屏幕正中央（Slint 没有内置居中，用 Win32 API 计算）
-#[cfg(windows)]
-fn center_on_screen(window: &MainWindow) {
-    #[link(name = "user32")]
-    extern "system" {
-        fn GetSystemMetrics(nIndex: i32) -> i32;
-    }
-    const SM_CXSCREEN: i32 = 0;
-    const SM_CYSCREEN: i32 = 1;
-    let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-    if screen_w <= 0 || screen_h <= 0 {
-        return;
-    }
-    let size = window.window().size();
-    let x = ((screen_w - size.width as i32) / 2).max(0);
-    let y = ((screen_h - size.height as i32) / 2).max(0);
-    window.window().set_position(slint::WindowPosition::Physical(
-        slint::PhysicalPosition::new(x, y),
-    ));
-}
-
-#[cfg(not(windows))]
-fn center_on_screen(_window: &MainWindow) {}
-
-/// 把窗口放到屏幕外：无边框样式应用完成前不显示在屏幕上，避免原生标题栏闪现。
-/// show() 前调用——Slint 会把位置存进 winit 的 WindowAttributes，窗口创建即生效。
-#[cfg(windows)]
-fn place_offscreen(window: &MainWindow) {
-    window.window().set_position(slint::WindowPosition::Physical(
-        slint::PhysicalPosition::new(-30_000, -30_000),
-    ));
-}
 
 /// 取主窗口的 Win32 HWND：枚举本进程的可见顶层窗口（不能用按标题的
 /// FindWindowW——多实例并存时会拿到别的实例的窗口）
 #[cfg(windows)]
-pub(crate) fn hwnd_of() -> Option<*mut core::ffi::c_void> {
+pub fn hwnd_of() -> Option<*mut core::ffi::c_void> {
     hwnd_of_excluding(None)
 }
 
 /// 同 [`hwnd_of`]，但可排除一个已知窗口（如主窗口，用于定位新弹出的对话框）
 #[cfg(windows)]
-pub(crate) fn hwnd_of_excluding(exclude: Option<*mut core::ffi::c_void>) -> Option<*mut core::ffi::c_void> {
+pub fn hwnd_of_excluding(exclude: Option<*mut core::ffi::c_void>) -> Option<*mut core::ffi::c_void> {
     #[link(name = "user32")]
     extern "system" {
         fn EnumWindows(callback: extern "system" fn(*mut core::ffi::c_void, isize) -> i32, lparam: isize) -> i32;
@@ -856,18 +718,18 @@ pub(crate) fn hwnd_of_excluding(exclude: Option<*mut core::ffi::c_void>) -> Opti
     ctx.found
 }
 
-/// 最小化窗口（Slint 1.18 没有暴露 minimize API，走 Win32）
-#[cfg(windows)]
-fn minimize_window(_window: &MainWindow) {
-    #[link(name = "user32")]
-    extern "system" {
-        fn ShowWindow(hwnd: *mut core::ffi::c_void, n_cmd_show: i32) -> i32;
-    }
-    const SW_MINIMIZE: i32 = 6;
-    if let Some(hwnd) = hwnd_of() {
-        unsafe { ShowWindow(hwnd, SW_MINIMIZE); }
-    }
+/// 把工作目录切到 exe 所在目录。
+///
+/// 主程序与日志都按相对路径读写（`conf/`、`logs/`、`python-{ver}/`），
+/// 而快捷方式、终端、其他程序的启动 cwd 未必是 exe 目录，必须显式对齐。
+/// GUI 版与 CLI 版放在同一目录时，因此天然共享同一套运行环境。
+///
+/// :return: 成功时返回 `()`。
+/// :raises String: 无法获取 exe 路径或切目录失败时。
+pub fn chdir_to_exe() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe
+        .parent()
+        .ok_or_else(|| "无法获取程序所在目录".to_string())?;
+    std::env::set_current_dir(dir).map_err(|e| e.to_string())
 }
-
-#[cfg(not(windows))]
-fn minimize_window(_window: &MainWindow) {}

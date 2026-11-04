@@ -1,16 +1,30 @@
 # LmmPyLauncher
 
-通用 **Python 桌面应用 Windows 启动器**（Rust + Slint GUI）。面向以 pip 包分发的
-Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用，无需用户安装 Python。
+通用 **Python 应用 Windows 启动器**（Rust；GUI 版用 Slint）。面向以 pip 包分发的
+Python 应用：双击 exe 即可自动准备 Python 环境并启动应用，无需用户安装 Python。
+
+## 形态
+
+同一份源码树产出两个二进制，各自定位明确、互不干扰：
+
+| 产物 | 子系统 | 用途 |
+|---|---|---|
+| `LmmPyLauncher.exe` | windows | **GUI 版**：双击启动，Slint splash，等待主程序窗口出现后自动隐藏 |
+| `LmmPyLauncherCli.exe` | console | **CLI 版**：无窗口，安装进度与主程序输出直连控制台，参数与退出码透传 |
+
+两者放在同一目录时共享 `python-{ver}/`、`conf/`、`logs/`，只需安装/更新一次。
+两者的差异只在 UI 层与参数策略，安装、更新、Python 部署逻辑来自同一个库
+（`src/lib.rs`，不依赖 Slint，因此 CLI 版体积约 1.8 MB，GUI 版约 17 MB）。
 
 ## 功能
 
 - **Splash 界面**：Slint 无边框窗口（深浅色跟随系统）、可选 logo、极细进度线 + 状态文字 + 可展开日志
-- **首次启动**：询问用户所在地区（中国大陆 / 其他），决定 PyPI 与 Python 发行版下载源，持久化到 exe 旁的 `launcher.conf.json`
+- **首次启动**：询问用户所在地区（中国大陆 / 其他），决定 PyPI 与 Python 发行版下载源，持久化到 exe 旁的 `launcher.conf.json`（GUI 弹模态窗口，CLI 走 stdin）
 - **Python 自动部署**：本机无 Python 时自动下载 embed 版（国内走 TUNA 镜像，其他地区走 python.org），自举 pip / setuptools
 - **pip 安装实时进度**：dry-run 解析包总数 → `Collecting` 行计数 → 状态栏分阶段文案
 - **自动更新**：启动时对比本地与远端版本，自动安装新版本
-- **主程序生命周期**：等待主程序出现首个可见窗口后隐藏启动器；主程序正常退出则启动器跟随退出；异常退出弹出崩溃报告窗口展示输出尾部 100 行
+- **主程序生命周期（GUI）**：等待主程序出现首个可见窗口后隐藏启动器；正常退出则跟随退出；异常退出弹出崩溃报告窗口展示输出尾部 100 行
+- **主程序生命周期（CLI）**：子进程继承当前控制台；退出码原样作为本进程退出码；Ctrl+C 交给子进程处理，启动器继续等待并透传结果
 - **进程清理**：Windows Job Object 保证启动器被强杀时子进程一并终止
 - **i18n**：全部界面与流程文案跟随系统语言（简体中文 / English）
 
@@ -27,7 +41,8 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
   "install_packages": ["your-app"],
   "uninstall_packages": [],
   "entry_point": "your_app.main",
-  "launch_command": "{python} -m {entry_point} {extra_args}",
+  "launch_command": "{python} -m {entry_point} gui",
+  "launch_command_cli": "{python} -m {entry_point} {extra_args}",
   "icon": "path/to/icon.ico",
   "logoPath": "logo.png"
 }
@@ -41,27 +56,56 @@ Python 桌面应用：双击 exe 即可自动准备 Python 环境并启动应用
 | `install_packages` | 要安装/更新的 pip 包名数组（纯名称，无版本约束） |
 | `uninstall_packages` | 安装前统一卸载的旧包名数组（历史包名迁移用，可为空数组） |
 | `entry_point` | `python -m` 的模块路径 |
-| `launch_command` | 启动命令模板，占位符 `{python}` / `{entry_point}` / `{extra_args}` |
+| `launch_command` | **GUI 版**启动命令模板，占位符 `{python}` / `{entry_point}`；通常不含 `{extra_args}`（GUI exe 不接受参数） |
+| `launch_command_cli` | **CLI 版**启动命令模板，可含 `{extra_args}`；缺省时回退 `launch_command`（此时参数被丢弃） |
 | `icon` | exe 图标（.ico，可选） |
 | `logoPath` | splash logo 图片（PNG/JPEG/SVG，可选；留空则不展示 logo） |
 
-2. 构建：`LMM_LAUNCHER_JSON=<配置绝对路径> cargo build --release`
-   （产物 `target/release/LmmPyLauncher.exe`）
+2. 构建：`LMM_LAUNCHER_JSON=<配置绝对路径> cargo build --release --bins`
+   产物为 `target/release/LmmPyLauncher.exe` 与 `target/release/LmmPyLauncherCli.exe`。
 
    - `logoPath` / `icon` 相对**配置文件所在目录**解析，配置与资源文件放在一起即可
    - 不设置 `LMM_LAUNCHER_JSON` 时使用源码根的 `launcher.json`（缺失则自动从
      示例生成占位配置），便于直接开发调试
    - 集成方源码树保持干净：构建过程只读配置路径，不向启动器仓库写入任何文件
-3. 分发：exe 与主程序包同目录放置，用户双击即用
+   - 只需一种形态时可 `--bin LmmPyLauncher` 或 `--bin LmmPyLauncherCli` 单独构建
+3. 分发：exe 与主程序包同目录放置，用户双击即用；两种形态按需一起分发
 
 ## 运行时参数
+
+启动器自身消费的参数（两种形态一致）：
 
 - `--install-version=X`：安装指定版本（对 `install_packages` 全部生效，隐含 `--skip-update`）
 - `--install-from-zip=<file>`：从 zip 安装补丁
 - `--install-from-package=<file>`：从 .whl / .tar.gz 安装
 - `--skip-update`：跳过更新检查直接启动
-- 其余参数原样透传给主程序
 - 运行时配置 `launcher.conf.json`（exe 旁）：`{"region": "cn" | "intl"}`
+
+其余参数的处理按形态区分：
+
+- **CLI 版**：未知开关、位置参数（如 `run`、`invoke auto_live`）、短选项全部原样透传给主程序；
+  以 `.zip` / `.whl` / `.tar.gz` 结尾的位置参数仍视为本地安装包。
+  主程序退出码即本进程退出码，可直接用于脚本判断。
+- **GUI 版**：不接受参数——未知开关被丢弃，位置参数直接报错退出（`unsupported file type`），
+  避免"传了参数但没生效"的静默失败。
+
+## 架构
+
+```
+src/
+  lib.rs        共享逻辑：参数解析、安装/更新、子进程生命周期、退出码
+  host.rs       交互抽象（询问地区 / 部署确认 / 崩溃报告 / 退出主循环）
+  app_config.rs 编译期配置（launcher.json）
+  deploy.rs     embed Python 部署
+  pip.rs        pip 调用与进度解析
+  settings.rs   运行时配置 launcher.conf.json
+  win32.rs      Win32 辅助（无边框、消息框、模态对话框）
+  bin/gui.rs    GUI 版入口（windows 子系统，Slint）
+  bin/cli.rs    CLI 版入口（console 子系统，stderr）
+```
+
+`lib` 不认识任何 UI：需要与用户交互时通过 `host::Host` 调用，由各 bin 注册实现。
+因此新增产物（例如托盘版）只需再写一个 bin，不必改安装逻辑。
 
 ## License
 

@@ -4,9 +4,20 @@ version = "0.1.7"
 edition = "2021"
 description = "LmmPyLauncher — 通用 Python 桌面应用启动器（Slint GUI）"
 
+[lib]
+# 公共逻辑（安装/更新/启动/配置）。不依赖 Slint，CLI 版因此不必链接 GUI 依赖。
+name = "lmm_launcher"
+path = "src/lib.rs"
+
 [[bin]]
+# GUI 版：windows 子系统 + Slint splash
 name = "LmmPyLauncher"
-path = "src/main.rs"
+path = "src/bin/gui.rs"
+
+[[bin]]
+# CLI 版：console 子系统，输出直连控制台，参数与退出码透传
+name = "LmmPyLauncherCli"
+path = "src/bin/cli.rs"
 
 [dependencies]
 # 精简 feature：仅 winit 后端 + femtovg 渲染器，去掉 accessibility 等额外组件
