@@ -125,9 +125,11 @@ pub struct Args {
 
 /// 解析启动器自身参数。
 ///
-/// 启动器独占的开关（`--install-*`、`--skip-update`）一律由启动器消费；
-/// `.zip` / `.whl` / `.tar.gz` 位置参数视为本地安装包。其余参数的处理取决于模式：
-/// GUI 模式拒绝（它是纯 GUI 入口，参数无从去处），CLI 模式原样透传给主程序。
+/// 两种模式的策略完全不同：
+/// - **CLI**：不识别任何启动器开关，命令行全部原样透传给主程序（启动器在 CLI 下
+///   不安装、不更新，`--install-*` 之类对它没有意义，静默吞掉反而更容易误判）。
+/// - **GUI**：识别 `--install-*` / `--skip-update` 等启动器开关；`.zip` / `.whl` /
+///   `.tar.gz` 位置参数视为本地安装包；其余参数直接报错（GUI exe 不接受参数）。
 ///
 /// :param mode: 运行模式。
 /// :return: 解析结果。
@@ -141,6 +143,13 @@ pub fn parse_args(mode: Mode) -> Result<Args, String> {
         skip_update: false,
         extra_args: Vec::new(),
     };
+
+    // CLI：纯透传，不做任何解释
+    if mode == Mode::Cli {
+        args.extra_args = std::env::args().skip(1).collect();
+        return Ok(args);
+    }
+
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
     while i < argv.len() {
@@ -175,11 +184,8 @@ pub fn parse_args(mode: Mode) -> Result<Args, String> {
                 if args.install_from_package.is_none() {
                     args.install_from_package = Some(std::path::PathBuf::from(a));
                 }
-            } else if mode == Mode::Cli {
-                // CLI 模式：未知开关与位置参数全部转发给主程序
-                args.extra_args.push(a.clone());
             } else {
-                // GUI 模式：exe 不接受参数，明确报错而不是静默丢弃
+                // GUI：exe 不接受参数，明确报错而不是静默丢弃
                 return Err(i18n::fill(s.unsupported_file_type, &[a]));
             }
         }
@@ -524,6 +530,51 @@ fn spawn_tail_reader<R: std::io::Read + Send + 'static>(
             t.push(line);
         }
     })
+}
+
+/// CLI 版启动路径：不做任何前置动作，直接启动主程序。
+///
+/// 与 [`run_main`] 的区别是刻意"什么都不管"：不探测 PyPI 镜像、不检查/安装更新、
+/// 不部署 Python、不询问地区，只做两件事——找到解释器、确认主程序已安装，然后
+/// 把参数原样交给主程序。环境准备完全交给 GUI 版。
+///
+/// :param ui: 事件通道（CLI 下由 stderr 泵消费）。
+/// :param args: 已解析的参数，`extra_args` 原样透传。
+/// :return: 主程序退出码。
+/// :raises String: 未检测到可用解释器，或主程序尚未安装时。
+pub fn run_cli(ui: &Ui, args: &Args) -> Result<i32, String> {
+    let s = i18n::strings();
+    let config = app_config::get();
+    let app = config.app_name.as_str();
+
+    // 找不到解释器时不尝试部署：CLI 不应替用户改动环境
+    let python = Pip::find_python().ok_or_else(|| i18n::fill(s.cli_python_missing, &[app]))?;
+
+    // 用 find_spec 判断包是否已安装：比 `pip show` 快一个量级，
+    // 且不依赖 pip 本身是否可用
+    let module = config
+        .entry_point
+        .split('.')
+        .next()
+        .unwrap_or(config.entry_point.as_str());
+    if !module_installed(&python, module) {
+        return Err(i18n::fill(s.cli_not_installed, &[app]));
+    }
+
+    Ok(run_app(ui, &args.extra_args, Mode::Cli)?.code)
+}
+
+/// 检查指定解释器能否 import 某个顶层模块。
+fn module_installed(python: &Path, module: &str) -> bool {
+    let script = format!(
+        "import importlib.util as u, sys; sys.exit(0 if u.find_spec({module:?}) else 1)"
+    );
+    let mut cmd = std::process::Command::new(python);
+    cmd.args(["-c", &script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .hide_console_window();
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// 主流程（在后台线程执行）：询问地区 → 定位/部署 Python → 安装或更新 → 启动主程序。

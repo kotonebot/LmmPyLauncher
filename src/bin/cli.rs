@@ -1,11 +1,11 @@
 //! LmmPyLauncher CLI 版入口（console 子系统）。
 //!
-//! 与 GUI 版共用 `lmm_launcher` 库的全部安装/更新/启动逻辑，区别只有三处：
-//! 1. 没有窗口，进度与日志直接打到 stderr；
-//! 2. 子进程继承当前控制台，输出与交互式输入对用户可见；
-//! 3. 全部参数透传给主程序，主程序退出码原样作为本进程退出码。
+//! 定位是"纯启动器"：**不承担任何环境准备**——不探测镜像、不检查/安装更新、不部署
+//! Python、不询问地区。只检查解释器与包是否就绪，然后原样把参数交给主程序；环境
+//! 未就绪时报错并提示先运行 GUI 版。
 //!
-//! 与 GUI 版放在同一目录时共享 `python-{ver}/`、`conf/`、`logs/`，只需安装一次。
+//! 与 GUI 版的共同点：同一套配置、同一份安装目录（`python-{ver}/`、`conf/`、`logs/`）。
+//! 区别：无窗口、子进程继承当前控制台、参数与退出码透传。
 
 // 控制台程序：windows 启动时自动分配/继承控制台，输出与退出码对调用方有效
 #![windows_subsystem = "console"]
@@ -15,7 +15,7 @@ use std::io::Write;
 use lmm_launcher::host::{self, Host};
 use lmm_launcher::settings::Region;
 use lmm_launcher::{
-    chdir_to_exe, i18n, job, logging, parse_args, run_main, Mode, Ui, UiMsg, BOOTSTRAP_VERSION,
+    chdir_to_exe, i18n, job, logging, parse_args, run_cli, Mode, Ui, UiMsg, BOOTSTRAP_VERSION,
 };
 
 /// CLI 版交互实现：全部走 stdin / stderr。
@@ -81,8 +81,8 @@ fn main() {
 
     let (ui, rx) = Ui::new();
 
-    // 消息泵：安装/更新阶段的状态与日志转成 stderr 输出。
-    // pip 的每一行也会走这里（CLI 用户的预期），需要静默时可用 2> 重定向。
+    // 消息泵：主程序启动前后的状态与日志转成 stderr 输出。
+    // 需要静默时可用 2> 重定向。
     std::thread::spawn(move || {
         while let Ok(msg) = rx.recv() {
             match msg {
@@ -94,11 +94,13 @@ fn main() {
         }
     });
 
-    let code = match run_main(ui, args, Mode::Cli) {
+    // CLI 版不走安装/更新流程：只检查环境是否就绪，然后直接启动主程序。
+    // 环境准备（Python 部署、pip 安装、自动更新）一律由 GUI 版负责。
+    let code = match run_cli(&ui, &args) {
         // 主程序退出码原样透传，便于脚本判断成败
-        Ok(outcome) => outcome.code,
+        Ok(code) => code,
         Err(e) => {
-            eprintln!("\n错误：{e}");
+            eprintln!("\n{e}");
             1
         }
     };

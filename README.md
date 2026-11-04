@@ -9,12 +9,14 @@ Python 应用：双击 exe 即可自动准备 Python 环境并启动应用，无
 
 | 产物 | 子系统 | 用途 |
 |---|---|---|
-| `LmmPyLauncher.exe` | windows | **GUI 版**：双击启动，Slint splash，等待主程序窗口出现后自动隐藏 |
-| `LmmPyLauncherCli.exe` | console | **CLI 版**：无窗口，安装进度与主程序输出直连控制台，参数与退出码透传 |
+| `LmmPyLauncher.exe` | windows | **GUI 版**：双击启动，Slint splash，负责 Python 部署、包安装/更新，等待主程序窗口出现后自动隐藏 |
+| `LmmPyLauncherCli.exe` | console | **CLI 版**：无窗口，不安装不更新，只检查环境后直接启动主程序；参数与退出码透传 |
 
-两者放在同一目录时共享 `python-{ver}/`、`conf/`、`logs/`，只需安装/更新一次。
-两者的差异只在 UI 层与参数策略，安装、更新、Python 部署逻辑来自同一个库
-（`src/lib.rs`，不依赖 Slint，因此 CLI 版体积约 1.8 MB，GUI 版约 17 MB）。
+两者放在同一目录时共享 `python-{ver}/`、`conf/`、`logs/`。**首次使用必须先跑一次 GUI 版**
+完成环境准备；CLI 版检测到环境未就绪会直接报错并提示这一点，不会自行安装。
+
+两者的安装、更新、Python 部署逻辑来自同一个库（`src/lib.rs`，不依赖 Slint），
+因此 CLI 版体积约 1.8 MB，GUI 版约 17 MB。
 
 ## 功能
 
@@ -25,6 +27,7 @@ Python 应用：双击 exe 即可自动准备 Python 环境并启动应用，无
 - **自动更新**：启动时对比本地与远端版本，自动安装新版本
 - **主程序生命周期（GUI）**：等待主程序出现首个可见窗口后隐藏启动器；正常退出则跟随退出；异常退出弹出崩溃报告窗口展示输出尾部 100 行
 - **主程序生命周期（CLI）**：子进程继承当前控制台；退出码原样作为本进程退出码；Ctrl+C 交给子进程处理，启动器继续等待并透传结果
+- **CLI 零前置动作**：不探测镜像、不检查更新、不安装、不部署 Python，启动耗时约 0.5 秒；环境未就绪时提示"请先运行 GUI 版"
 - **进程清理**：Windows Job Object 保证启动器被强杀时子进程一并终止
 - **i18n**：全部界面与流程文案跟随系统语言（简体中文 / English）
 
@@ -73,21 +76,35 @@ Python 应用：双击 exe 即可自动准备 Python 环境并启动应用，无
 
 ## 运行时参数
 
-启动器自身消费的参数（两种形态一致）：
+两种形态的参数策略完全不同：
+
+### CLI 版：全量透传
+
+`LmmPyLauncherCli.exe <任意参数>` 不做任何解释——**所有**命令行内容原样交给主程序，
+包括 `--install-*` 这类开关（CLI 不安装不更新，这些开关对它没有意义，静默吞掉反而
+更容易误判）。主程序退出码即本进程退出码，可直接用于脚本判断。
+
+```bash
+LmmPyLauncherCli.exe list tasks
+LmmPyLauncherCli.exe invoke auto_live --count 10
+LmmPyLauncherCli.exe --debug run > out.txt
+```
+
+环境未就绪时（找不到解释器 / 包未安装）直接报错退出（码 1），提示先运行 GUI 版。
+
+### GUI 版：拒绝参数，只认启动器开关
 
 - `--install-version=X`：安装指定版本（对 `install_packages` 全部生效，隐含 `--skip-update`）
 - `--install-from-zip=<file>`：从 zip 安装补丁
 - `--install-from-package=<file>`：从 .whl / .tar.gz 安装
 - `--skip-update`：跳过更新检查直接启动
-- 运行时配置 `launcher.conf.json`（exe 旁）：`{"region": "cn" | "intl"}`
 
-其余参数的处理按形态区分：
+其余参数一律视为错误：未知开关被丢弃，位置参数直接报错退出（`unsupported file type`），
+避免"传了参数但没生效"的静默失败。
 
-- **CLI 版**：未知开关、位置参数（如 `run`、`invoke auto_live`）、短选项全部原样透传给主程序；
-  以 `.zip` / `.whl` / `.tar.gz` 结尾的位置参数仍视为本地安装包。
-  主程序退出码即本进程退出码，可直接用于脚本判断。
-- **GUI 版**：不接受参数——未知开关被丢弃，位置参数直接报错退出（`unsupported file type`），
-  避免"传了参数但没生效"的静默失败。
+### 通用
+
+- 运行时配置 `launcher.conf.json`（exe 旁）：`{"region": "cn" | "intl"}`，仅 GUI 版会写入/询问
 
 ## 架构
 

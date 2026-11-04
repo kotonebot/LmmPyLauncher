@@ -54,6 +54,10 @@ pub struct Strings {
     // ---- 主流程 ----
     pub initializing: &'static str,
     pub python_not_found: &'static str,
+    /// `{}` = 应用名。CLI 版专用：找不到解释器，提示先跑 GUI
+    pub cli_python_missing: &'static str,
+    /// `{}` = 应用名。CLI 版专用：主程序未安装，提示先跑 GUI
+    pub cli_not_installed: &'static str,
     pub finding_mirror: &'static str,
     /// `{}` = 镜像地址
     pub testing_server: &'static str,
@@ -261,6 +265,8 @@ const ZH: Strings = Strings {
 
     initializing: "初始化...",
     python_not_found: "未找到 Python 解释器，准备部署...",
+    cli_python_missing: "未检测到可用的 Python 环境，无法启动。\n请先运行 {} 的图形界面版完成首次安装。",
+    cli_not_installed: "主程序尚未安装，无法启动。\n请先运行 {} 的图形界面版完成首次安装。",
     finding_mirror: "寻找最快的 PyPI 镜像源...",
     testing_server: "  正在测试: {}",
     server_ok: "  找到可用的pip服务器: {}",
@@ -398,6 +404,8 @@ const EN: Strings = Strings {
 
     initializing: "Initializing...",
     python_not_found: "No Python interpreter found. Preparing deployment...",
+    cli_python_missing: "No usable Python environment found, cannot start.\nRun the {} GUI once to finish the first-time installation.",
+    cli_not_installed: "{} is not installed yet, cannot start.\nRun the GUI once to finish the first-time installation.",
     finding_mirror: "Finding the fastest PyPI mirror...",
     testing_server: "  Testing: {}",
     server_ok: "  Usable pip server found: {}",
