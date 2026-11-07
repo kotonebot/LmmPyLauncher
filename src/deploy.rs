@@ -62,17 +62,16 @@ fn prompt_user(app_name: &str, dir: &Path) -> bool {
 /// 确保配置里的解释器可用：不存在时询问并自动部署 embed 版，返回解释器路径。
 ///
 /// 部署目标是 `python_path` 的父目录，因此下载完成后的路径与配置永远一致，
-/// 不需要"先按版本拼目录、再比对配置"。
+/// 不需要"先按版本拼目录、再比对配置"。但**提示里给出的是启动器所在目录**：
+/// `python_path` 指向哪个子目录是实现细节，用户要判断的是"把程序放在哪个文件夹"。
 pub fn ensure_python(ui: &Ui) -> Result<PathBuf, String> {
     let config = crate::app_config::get();
     let python_exe = configured_python_path()
         .ok_or_else(|| strings().python_not_found.to_string())?;
-    let target_dir = python_exe
-        .parent()
-        .ok_or_else(|| strings().python_not_found.to_string())?;
     #[cfg(windows)]
     {
-        if !prompt_user(&config.app_name, target_dir) {
+        let prompt_dir = crate::settings::exe_dir().unwrap_or_else(|_| python_exe.clone());
+        if !prompt_user(&config.app_name, &prompt_dir) {
             crate::logging::info(strings().user_cancelled_deploy);
             std::process::exit(0);
         }
