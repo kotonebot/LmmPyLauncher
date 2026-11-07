@@ -1,13 +1,13 @@
 //! Python 解释器缺失时的自动部署：
-//! 1. 弹出原生消息框询问用户是否在本目录下载安装（取消则终止）
+//! 1. 弹出原生消息框询问用户是否在配置所在目录下载安装（取消则终止）
 //! 2. 按用户选择的地区（settings::Region）从镜像或 python.org 下载 embed 版
 //!    Python（版本来自编译期配置 launcher.json 的 `python_version`），
-//!    解压到 exe 旁的 `python-{version}/`
+//!    解压到 `python_path` 指向文件的父目录
 //! 3. 修改 `pythonXY._pth` 启用 `import site`，使 site-packages 生效
 //! 4. 从所选源下载 pip 的通用 wheel 并安装
 //!
-//! 部署完成后 `Pip::find_python()` 会找到 exe 旁的 `python-{version}/python.exe`，
-//! 后续安装流程照常进行。
+//! 部署目标由 `python_path` 决定（而不是按版本拼目录），因此部署完的路径与
+//! 配置永远一致，`Pip::find_python()` 随后即可命中。
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -24,18 +24,17 @@ const TUNA_PYTHON_MIRROR: &str = "https://mirrors.tuna.tsinghua.edu.cn/python";
 /// 官方源
 const PYTHON_OFFICIAL_FTP: &str = "https://www.python.org/ftp/python";
 
-/// 已部署 Python 的解释器路径（exe 旁 python-{version}/python.exe）
-#[cfg(windows)]
-pub fn installed_python_path() -> Option<PathBuf> {
-    let dir = crate::settings::exe_dir().ok()?;
-    let version = &crate::app_config::get().python_version;
-    let python = dir.join(format!("python-{version}")).join("python.exe");
-    python.exists().then_some(python)
-}
-
-#[cfg(not(windows))]
-pub fn installed_python_path() -> Option<PathBuf> {
-    None
+/// 配置 `python_path` 的绝对路径：相对路径按 exe 所在目录解析。
+///
+/// 返回值**不保证文件存在**——不存在时由 [`ensure_python`] 把 embed 版
+/// 下载解压到该路径的父目录，因此路径本身就是部署目标。
+pub fn configured_python_path() -> Option<PathBuf> {
+    let raw = &crate::app_config::get().python_path;
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        return Some(path);
+    }
+    Some(crate::settings::exe_dir().ok()?.join(path))
 }
 
 /// embed zip 的候选下载地址（按地区，优先级从高到低）
@@ -60,31 +59,40 @@ fn prompt_user(app_name: &str, dir: &Path) -> bool {
     crate::host::get().confirm(&text, s.deploy_prompt_title)
 }
 
-/// 确保有可用的 Python：弹窗确认后自动部署 embed 版，返回解释器路径
+/// 确保配置里的解释器可用：不存在时询问并自动部署 embed 版，返回解释器路径。
+///
+/// 部署目标是 `python_path` 的父目录，因此下载完成后的路径与配置永远一致，
+/// 不需要"先按版本拼目录、再比对配置"。
 pub fn ensure_python(ui: &Ui) -> Result<PathBuf, String> {
     let config = crate::app_config::get();
-    let dir = crate::settings::exe_dir()?;
+    let python_exe = configured_python_path()
+        .ok_or_else(|| strings().python_not_found.to_string())?;
+    let target_dir = python_exe
+        .parent()
+        .ok_or_else(|| strings().python_not_found.to_string())?;
     #[cfg(windows)]
     {
-        if !prompt_user(&config.app_name, &dir) {
+        if !prompt_user(&config.app_name, target_dir) {
             crate::logging::info(strings().user_cancelled_deploy);
             std::process::exit(0);
         }
     }
-    deploy_embedded_python(ui, &dir, &config.python_version)
+    deploy_embedded_python(ui, &python_exe, &config.python_version)
 }
 
-fn deploy_embedded_python(ui: &Ui, dir: &Path, version: &str) -> Result<PathBuf, String> {
-    let target = dir.join(format!("python-{version}"));
-    let python_exe = target.join("python.exe");
+/// 下载 embed 版并解压到 `python_exe` 的父目录。
+fn deploy_embedded_python(ui: &Ui, python_exe: &Path, version: &str) -> Result<PathBuf, String> {
     if python_exe.exists() {
         ui.log(&fill(strings().python_exists, &[version, &python_exe.display().to_string()]));
-        return Ok(python_exe);
+        return Ok(python_exe.to_path_buf());
     }
+    let target = python_exe
+        .parent()
+        .ok_or_else(|| strings().python_not_found.to_string())?;
 
     // 下载 embed zip：按地区选择源，失败时依次尝试候选地址
     ui.status(&fill(strings().downloading_python, &[version]));
-    let zip_path = dir.join(format!("python-{version}-embed-amd64.zip"));
+    let zip_path = target.join(format!("python-{version}-embed-amd64.zip"));
     let mut last_err: Option<String> = None;
     for url in &embed_zip_urls(version) {
         match download(ui, url, &zip_path, 0.0, 7.0) {
@@ -103,20 +111,20 @@ fn deploy_embedded_python(ui: &Ui, dir: &Path, version: &str) -> Result<PathBuf,
     }
 
     ui.status(strings().extracting_python);
-    extract_zip(&zip_path, &target)?;
+    extract_zip(&zip_path, target)?;
     ui.progress(8.0);
 
-    enable_import_site(&target)?;
+    enable_import_site(target)?;
 
     ui.status(strings().configuring_pip);
-    install_pip(ui, &python_exe)?;
+    install_pip(ui, python_exe)?;
     ui.progress(10.0);
 
     // 清理下载的 zip
     let _ = std::fs::remove_file(&zip_path);
     crate::logging::info(&fill(strings().python_ready, &[version, &python_exe.display().to_string()]));
     ui.log(&fill(strings().python_ready, &[version]));
-    Ok(python_exe)
+    Ok(python_exe.to_path_buf())
 }
 
 /// 下载文件到 dest，进度上报到 UI（base ~ base+span 的进度区间）

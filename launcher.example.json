@@ -1,7 +1,7 @@
 {
   "app_name": "My App",
   "python_version": "3.11.9",
-  "python_dist_dir": "",
+  "python_path": "python-3.11.9\\python.exe",
   "install_packages": [
     "my-app"
   ],

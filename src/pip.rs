@@ -98,36 +98,13 @@ impl Pip {
         }
     }
 
-    /// 在启动器所在目录下查找内嵌 Python（路径来自编译期配置 launcher.json），
-    /// 找不到时回退到 PATH 上的 python。
+    /// 定位解释器：只认配置里的 `python_path`。
+    ///
+    /// 文件不存在时返回 None，由调用方（`run_main`）触发自动部署。
+    /// 有意不查 PATH：系统 Python 的版本不可控（本程序要求 ~=3.10），
+    /// 且把几十个依赖装进用户的全局环境属于侵入行为。
     pub fn find_python() -> Option<PathBuf> {
-        let dist_dir = crate::app_config::get().python_dist_dir.clone();
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                if !dist_dir.is_empty() {
-                    let embedded = dir.join(&dist_dir).join("python.exe");
-                    if embedded.exists() {
-                        return Some(embedded);
-                    }
-                    // 也尝试发行版根目录下的其它变体（保持兼容，扫描一层）
-                    if let Some(root) = dist_dir.split(['/', '\\']).next() {
-                        if let Ok(entries) = std::fs::read_dir(dir.join(root)) {
-                            for entry in entries.flatten() {
-                                let candidate = entry.path().join("python.exe");
-                                if candidate.exists() {
-                                    return Some(candidate);
-                                }
-                            }
-                        }
-                    }
-                }
-                // 自动部署的 embed Python（exe 旁 python-{version}/，见 deploy.rs）
-                if let Some(p) = crate::deploy::installed_python_path() {
-                    return Some(p);
-                }
-            }
-        }
-        which_python_on_path()
+        crate::deploy::configured_python_path().filter(|p| p.exists())
     }
 
     fn call_pip(&mut self, args: &[String]) -> std::io::Result<i32> {
@@ -393,17 +370,9 @@ impl Pip {
     }
 }
 
-/// 通过 `where python` 查找 PATH 上的 Python
-fn which_python_on_path() -> Option<PathBuf> {
-    Command::new("where")
-        .arg("python")
-        .creation_flags(0x0800_0000)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .and_then(|s| s.lines().next().map(|l| PathBuf::from(l.trim())))
-}
+// 说明：这里原本有 which_python_on_path()（`where python` 回退）。
+// 由于系统 Python 的版本不可控、且会污染用户的全局 site-packages，
+// 启动器改为只使用配置指定的 `python_path`，不存在就自动部署 embed 版。
 
 type OnLine = Box<dyn FnMut(&str) + Send>;
 

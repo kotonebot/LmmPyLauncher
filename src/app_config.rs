@@ -3,10 +3,11 @@
 //!
 //! 字段说明：
 //! - `app_name`: 应用名称（窗口标题、界面标题）
-//! - `python_version`: 本机没有 Python 时自动部署的 embed 版 Python 版本号
+//! - `python_version`: 需要自动部署的 embed 版 Python 版本号
 //!   （如 "3.10.11"，用于拼接镜像/python.org 的 embed zip 下载地址）
-//! - `python_dist_dir`: 内嵌 Python 发行版目录（相对启动器 exe 所在目录），
-//!   为空字符串则跳过内嵌查找、直接回退 PATH 上的 python
+//! - `python_path`: Python 解释器路径（必填）。相对路径按启动器 exe 所在目录解析，
+//!   也可写绝对路径。文件不存在时把 embed 版下载解压到该路径的父目录。
+//!   启动器**只认这个路径**，永不使用系统（PATH 上的）Python。
 //! - `install_packages`: 要安装/更新的主程序 pip 包名数组（纯名称，不含版本约束）
 //! - `uninstall_packages`: 安装前统一卸载的旧包名数组（历史包名等，可为空数组）
 //! - `entry_point`: 主程序入口点（`python -m <entry_point>` 的模块路径）
@@ -27,7 +28,9 @@ const CONFIG_JSON: &str = include_str!(env!("LMM_LAUNCHER_CONFIG"));
 pub struct AppConfig {
     pub app_name: String,
     pub python_version: String,
-    pub python_dist_dir: String,
+    /// 解释器路径（相对 exe 目录或绝对路径）。必填，指向的文件可以不存在——
+    /// 不存在时由 deploy 下载 embed 版到它的父目录。
+    pub python_path: String,
     pub install_packages: Vec<String>,
     pub uninstall_packages: Vec<String>,
     pub entry_point: String,
@@ -49,7 +52,7 @@ pub fn get() -> &'static AppConfig {
         AppConfig {
             app_name: v["app_name"].as_str().unwrap_or("App").to_string(),
             python_version: v["python_version"].as_str().unwrap_or("3.10.11").to_string(),
-            python_dist_dir: v["python_dist_dir"].as_str().unwrap_or("").to_string(),
+            python_path: required(&v, "python_path"),
             install_packages: string_array(&v, "install_packages"),
             // uninstall_packages 是可选字段（历史包名迁移用，可为空数组），
             // 只有 install_packages 强制非空。

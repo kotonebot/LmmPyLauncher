@@ -40,7 +40,7 @@ Python 应用：双击 exe 即可自动准备 Python 环境并启动应用，无
 {
   "app_name": "你的应用名",
   "python_version": "3.10.11",
-  "python_dist_dir": "",
+  "python_path": "python-3.10.11\\python.exe",
   "install_packages": ["your-app"],
   "uninstall_packages": [],
   "entry_point": "your_app.main",
@@ -54,8 +54,8 @@ Python 应用：双击 exe 即可自动准备 Python 环境并启动应用，无
 | 字段 | 说明 |
 |---|---|
 | `app_name` | 应用名（窗口标题 / 界面标题） |
-| `python_version` | 自动部署的 embed Python 版本 |
-| `python_dist_dir` | 内嵌 Python 发行版目录（相对 exe，可空） |
+| `python_version` | 自动部署的 embed Python 版本（只决定下载哪个版本） |
+| `python_path` | **必填**。解释器路径，相对 exe 目录或绝对路径；**文件不存在时**把 embed 版下载解压到它的父目录。启动器只认这个路径，**永不使用系统（PATH 上）的 Python** |
 | `install_packages` | 要安装/更新的 pip 包名数组（纯名称，无版本约束） |
 | `uninstall_packages` | 安装前统一卸载的旧包名数组（历史包名迁移用，可为空数组） |
 | `entry_point` | `python -m` 的模块路径 |
