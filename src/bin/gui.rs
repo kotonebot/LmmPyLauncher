@@ -35,18 +35,56 @@ impl Host for GuiHost {
     fn confirm(&self, text: &str, title: &str) -> bool {
         const MB_OKCANCEL: u32 = 0x0000_0001;
         const MB_ICONQUESTION: u32 = 0x0000_0020;
+        const MB_TOPMOST: u32 = 0x0004_0000;
+        const MB_SETFOREGROUND: u32 = 0x0001_0000;
         const IDOK: i32 = 1;
-        // 挂主窗口为属主：此时主窗口是前台，无属主的消息框会被它完全遮挡
-        lmm_launcher::win32::message_box_owned(
-            hwnd_of(),
-            text,
-            title,
-            MB_OKCANCEL | MB_ICONQUESTION,
-        ) == IDOK
+
+        // 部署流程跑在工作线程，可能早于 UI 线程创建原生窗口（Slint 惰性创建）。
+        // 此时 owner 为 None/已失效，MessageBoxW 会立即返回 0——那**不是**用户取消。
+        // 先等主窗口就绪；再不行就退化为无属主弹窗，并一律置顶，避免被主窗口遮挡。
+        let mut owner = hwnd_of();
+        for _ in 0..50 {
+            if owner.is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            owner = hwnd_of();
+        }
+
+        let style = MB_OKCANCEL | MB_ICONQUESTION | MB_TOPMOST | MB_SETFOREGROUND;
+        let mut ret = lmm_launcher::win32::message_box_owned(owner, text, title, style);
+        if ret == 0 {
+            logging::error(&format!("部署确认框创建失败（owner={owner:?}），改用无属主重试"));
+            ret = lmm_launcher::win32::message_box_owned(None, text, title, style);
+        }
+        // 1=确定 2=取消 0=创建失败。记录下来，便于区分"用户点了取消"与"弹窗根本没出来"。
+        logging::info(&format!("部署确认框返回 {ret}（owner={owner:?}）"));
+
+        match ret {
+            IDOK => true,
+            // 弹窗始终无法创建：不能当成用户拒绝，否则程序会无声退出。
+            // 部署确认只是告知，不是安全边界，这里按同意继续。
+            0 => {
+                logging::error("无法显示部署确认框，按同意继续");
+                true
+            }
+            _ => false,
+        }
     }
 
     fn request_quit(&self) {
         let _ = slint::quit_event_loop();
+    }
+
+    fn notify(&self, text: &str, title: &str) {
+        const MB_OK: u32 = 0x0000_0000;
+        const MB_ICONINFORMATION: u32 = 0x0000_0040;
+        lmm_launcher::win32::message_box_owned(
+            hwnd_of(),
+            text,
+            title,
+            MB_OK | MB_ICONINFORMATION,
+        );
     }
 
     fn crash(&self, title: &str, hint: &str, tail: &str) {

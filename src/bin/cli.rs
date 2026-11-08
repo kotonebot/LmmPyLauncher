@@ -33,6 +33,10 @@ impl Host for CliHost {
     /// CLI 没有消息循环，退出由 `main` 的返回值决定
     fn request_quit(&self) {}
 
+    fn notify(&self, text: &str, title: &str) {
+        eprintln!("{title}: {text}");
+    }
+
     fn crash(&self, title: &str, hint: &str, tail: &str) {
         eprintln!("\n{title}");
         eprintln!("{hint}");

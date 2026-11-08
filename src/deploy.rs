@@ -73,6 +73,11 @@ pub fn ensure_python(ui: &Ui) -> Result<PathBuf, String> {
         let prompt_dir = crate::settings::exe_dir().unwrap_or_else(|_| python_exe.clone());
         if !prompt_user(&config.app_name, &prompt_dir) {
             crate::logging::info(strings().user_cancelled_deploy);
+            // 不给提示就退出的话窗口会无声消失，用户会误认为崩溃
+            crate::host::get().notify(
+                strings().deploy_cancelled_notice,
+                strings().deploy_prompt_title,
+            );
             std::process::exit(0);
         }
     }

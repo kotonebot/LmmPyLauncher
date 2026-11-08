@@ -24,6 +24,17 @@ pub trait Host: Send + Sync {
     /// :return: 用户是否同意。
     fn confirm(&self, text: &str, title: &str) -> bool;
 
+    /// 提示一条信息（无分支，仅告知）。
+    ///
+    /// 用于"用户拒绝部署后程序即将退出"这类场景：不给提示的话窗口会无声消失，
+    /// 用户会当成崩溃。默认实现不做任何事，由各 bin 覆盖。
+    ///
+    /// :param text: 正文。
+    /// :param title: 标题。
+    fn notify(&self, text: &str, title: &str) {
+        let _ = (text, title);
+    }
+
     /// 请求退出主消息循环。可从任意线程调用。
     fn request_quit(&self);
 

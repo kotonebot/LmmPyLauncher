@@ -215,6 +215,7 @@ pub struct Strings {
     /// `{}` = 错误
     pub exe_dir_fail: &'static str,
     pub user_cancelled_deploy: &'static str,
+    pub deploy_cancelled_notice: &'static str,
 
     // ---- Job Object（job.rs） ----
     pub job_create_fail: &'static str,
@@ -366,6 +367,7 @@ const ZH: Strings = Strings {
     install_setuptools_fail: "安装 setuptools 失败，返回码: {}",
     exe_dir_fail: "无法获取程序位置: {}",
     user_cancelled_deploy: "用户取消了 Python 环境安装，启动器退出",
+    deploy_cancelled_notice: "未安装 Python 环境，程序无法运行，启动器即将退出。如需使用，请重新启动并允许下载。",
 
     job_create_fail: "创建 Job Object 失败，子进程将不受退出清理保护",
     job_limit_fail: "设置 Job Object 限制失败",
@@ -505,6 +507,7 @@ const EN: Strings = Strings {
     install_setuptools_fail: "Failed to install setuptools, exit code: {}",
     exe_dir_fail: "Failed to get program location: {}",
     user_cancelled_deploy: "User cancelled Python deployment; launcher exiting",
+    deploy_cancelled_notice: "Python was not installed, so the application cannot run. The launcher will exit. Restart and allow the download to continue.",
 
     job_create_fail: "Failed to create Job Object; child processes won't be cleaned up on exit",
     job_limit_fail: "Failed to set Job Object limits",
