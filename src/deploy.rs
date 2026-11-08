@@ -89,6 +89,12 @@ fn deploy_embedded_python(ui: &Ui, python_exe: &Path, version: &str) -> Result<P
         .parent()
         .ok_or_else(|| strings().python_not_found.to_string())?;
 
+    // 目标目录此时可能还不存在（python_path 指向一个尚未创建的子目录，
+    // 例如 exe\python-3.10.11\python.exe），必须先建出来，
+    // 否则下面的 File::create 会以 os error 3（路径不存在）失败。
+    std::fs::create_dir_all(target)
+        .map_err(|e| fill(strings().create_dir_fail, &[&e.to_string()]))?;
+
     // 下载 embed zip：按地区选择源，失败时依次尝试候选地址
     ui.status(&fill(strings().downloading_python, &[version]));
     let zip_path = target.join(format!("python-{version}-embed-amd64.zip"));
